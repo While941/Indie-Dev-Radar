@@ -74,8 +74,13 @@ def test_item_to_fields_full_mapping() -> None:
         dimensions={"relevance": 8, "utility": 7, "freshness": 6, "popularity": 5,
                     "differentiation": 4, "biz_value": 3, "risk": 1},
         risk_level="中", one_line_summary="一句话", recommended_action="发布",
-        recommended_platforms=("小红书", "公众号"), target_audience="Godot 开发者",
-        recommended_title="推荐标题", drafts={"小红书": "xhs", "公众号": "gz", "B站": "bili"},
+        recommended_platforms=("小红书", "知乎"), target_audience="Godot 开发者",
+        recommended_title="推荐标题",
+        platform_posts={
+            "小红书": {"title": "xhs题", "body": "xhs文"},
+            "知乎": {"title": "zh题", "body": "zh文"},
+            "B站": {"title": "b题", "body": "b文"},
+        },
     )
     f = item_to_fields(item)
     assert f["来源"] == "GitHub"
@@ -86,8 +91,13 @@ def test_item_to_fields_full_mapping() -> None:
     assert f["分类"] == "开源项目"
     assert f["标签"] == ["godot", "2d"]
     assert f["推荐动作"] == "发布"
-    assert f["推荐发布平台"] == ["小红书", "公众号"]
-    assert f["小红书草稿"] == "xhs"
+    assert f["推荐发布平台"] == ["小红书", "知乎"]
+    assert f["小红书标题"] == "xhs题"
+    assert f["小红书正文"] == "xhs文"
+    assert f["知乎标题"] == "zh题"
+    assert f["知乎正文"] == "zh文"
+    assert f["B站标题"] == "b题"
+    assert f["B站正文"] == "b文"
     assert f["发布时间"] == _to_ms(published)
     assert f["抓取时间"] == _to_ms(fetched)
 

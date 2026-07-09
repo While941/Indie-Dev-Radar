@@ -54,7 +54,11 @@ class FakeRewriter:
         out = []
         for i in items:
             if i.score is not None and i.score >= 70:
-                out.append(replace(i, drafts={"小红书": "x"}))
+                out.append(replace(
+                    i,
+                    platform_posts={"小红书": {"title": "t", "body": "x"}},
+                    drafts={"小红书": "x"},
+                ))
             else:
                 out.append(i)
         return out
@@ -85,7 +89,8 @@ def test_dry_run_prints_items_without_pushing() -> None:
         collectors=[FakeCollector([
             _item("u1"),
             _item("u2", one_line_summary="一句话", recommended_action="发布",
-                  drafts={"小红书": "x"}),
+                  platform_posts={"小红书": {"title": "题", "body": "正文很长很长很长很长很长很长很长"}},
+                  drafts={"小红书": "正文很长很长很长很长很长很长很长"}),
         ])],
         out=lines.append,
     )
@@ -98,7 +103,7 @@ def test_dry_run_prints_items_without_pushing() -> None:
     assert any("dry-run" in line for line in lines)
     assert any("一句话" in line for line in lines)
     assert any("发布" in line for line in lines)
-    assert any("drafts" in line for line in lines)
+    assert any("[小红书]" in line for line in lines)
 
 
 def test_dedup_uses_feishu_seen_urls_on_push_path() -> None:
@@ -148,6 +153,7 @@ def test_scorer_and_rewriter_applied() -> None:
     assert result.scored == 2
     assert result.rewritten == 2
     assert result.ai_aborted is False
+    assert all(i.has_publish_content for i in feishu.created)
     assert all(i.drafts == {"小红书": "x"} for i in feishu.created)
     assert result.pushed == 2
 

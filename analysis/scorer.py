@@ -24,7 +24,7 @@ RISK_DIM = "risk"
 ALL_DIMS = POSITIVE_DIMS + (RISK_DIM,)
 
 VALID_ACTIONS = frozenset({"待审核", "发布", "暂存", "加入周报", "删除"})
-VALID_PLATFORMS = frozenset({"小红书", "公众号", "B站"})
+VALID_PLATFORMS = frozenset({"小红书", "知乎", "B站"})
 RISK_LEVELS = frozenset({"低", "中", "高"})
 
 

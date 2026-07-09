@@ -34,6 +34,13 @@ TABLE_NAME = "情报候选"
 PRIMARY_FIELD = "标题"            # text field created as the table's primary column
 URL_FIELD = "原始链接"             # dedup key
 
+# In-memory platform key -> Feishu column names for title / body.
+PLATFORM_CONTENT_FIELDS: dict[str, tuple[str, str]] = {
+    "小红书": ("小红书标题", "小红书正文"),
+    "知乎": ("知乎标题", "知乎正文"),
+    "B站": ("B站标题", "B站正文"),
+}
+
 FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("来源", FieldType.SINGLE_SELECT, ("GitHub", "HackerNews", "Godot")),
     FieldSpec(URL_FIELD, FieldType.TEXT),
@@ -50,25 +57,20 @@ FIELDS: tuple[FieldSpec, ...] = (
     FieldSpec("一句话总结", FieldType.TEXT),
     FieldSpec("适合人群", FieldType.TEXT),
     FieldSpec("推荐动作", FieldType.SINGLE_SELECT,
-              ("待审核", "发布", "暂存", "加入周报", "删除", "已发布")),
-    FieldSpec("推荐发布平台", FieldType.MULTI_SELECT, ("小红书", "公众号", "B站")),
+              ("待审核", "发布", "暂存", "加入周报", "删除", "已发布", "发布失败")),
+    FieldSpec("推荐发布平台", FieldType.MULTI_SELECT, ("小红书", "知乎", "B站")),
     FieldSpec("推荐标题", FieldType.TEXT),
-    FieldSpec("小红书草稿", FieldType.TEXT),
-    FieldSpec("公众号草稿", FieldType.TEXT),
-    FieldSpec("B站动态草稿", FieldType.TEXT),
+    FieldSpec("小红书标题", FieldType.TEXT),
+    FieldSpec("小红书正文", FieldType.TEXT),
+    FieldSpec("知乎标题", FieldType.TEXT),
+    FieldSpec("知乎正文", FieldType.TEXT),
+    FieldSpec("B站标题", FieldType.TEXT),
+    FieldSpec("B站正文", FieldType.TEXT),
     FieldSpec("人工备注", FieldType.TEXT),
     FieldSpec("已发布链接", FieldType.TEXT),
 )
 
 FIELD_NAMES = frozenset(f.name for f in FIELDS)
-
-# Maps the in-memory draft label (used by rewriter prompts / item.drafts) to the
-# Feishu field name. Defined once so the writer and the table schema cannot drift.
-DRAFT_FIELDS = {
-    "小红书": "小红书草稿",
-    "公众号": "公众号草稿",
-    "B站": "B站动态草稿",
-}
 
 # Human-readable labels for dimension keys written into the 「维度评分」 field.
 DIMENSION_LABELS = {

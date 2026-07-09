@@ -20,23 +20,48 @@ def _item(score: float | None = None) -> IntelligenceItem:
 
 # --- parse_rewrite_response -----------------------------------------------
 
-def test_parse_filters_invalid_draft_keys() -> None:
+def test_parse_platforms_title_body() -> None:
     raw = {
         "recommended_title": "好标题",
         "tags": ["Godot", "  ", "2D"],
-        "drafts": {"小红书": "xhs", "公众号": "gz", "知乎": "should-drop", "B站": ""},
+        "platforms": {
+            "小红书": {"title": "xhs题", "body": "xhs文"},
+            "知乎": {"title": "zh题", "body": "zh文"},
+            "B站": {"title": "b题", "body": "b文"},
+            "公众号": {"title": "drop", "body": "drop"},
+        },
     }
     parsed = parse_rewrite_response(raw)
     assert parsed["recommended_title"] == "好标题"
     assert parsed["tags"] == ("Godot", "2D")
-    assert set(parsed["drafts"]) == {"小红书", "公众号"}   # 知乎 filtered, B站 empty dropped
+    assert set(parsed["platform_posts"]) == {"小红书", "知乎", "B站"}
+    assert parsed["platform_posts"]["小红书"] == {"title": "xhs题", "body": "xhs文"}
+    assert parsed["drafts"]["小红书"] == "xhs文"
+
+
+def test_parse_legacy_drafts_strings() -> None:
+    raw = {
+        "drafts": {"小红书": "xhs", "知乎": "zh", "公众号": "drop", "B站": ""},
+    }
+    parsed = parse_rewrite_response(raw)
+    assert set(parsed["platform_posts"]) == {"小红书", "知乎"}
+    assert parsed["platform_posts"]["小红书"]["body"] == "xhs"
+    assert parsed["drafts"]["知乎"] == "zh"
 
 
 def test_parse_omits_missing_fields() -> None:
-    parsed = parse_rewrite_response({"drafts": {}})
+    parsed = parse_rewrite_response({"platforms": {}})
+    assert parsed["platform_posts"] == {}
     assert parsed["drafts"] == {}
     assert "recommended_title" not in parsed
     assert "tags" not in parsed
+
+
+def test_parse_fallback_recommended_title_from_platform() -> None:
+    parsed = parse_rewrite_response({
+        "platforms": {"知乎": {"title": "仅知乎标题", "body": "正文"}},
+    })
+    assert parsed["recommended_title"] == "仅知乎标题"
 
 
 # --- Rewriter threshold + integration -------------------------------------
@@ -49,28 +74,37 @@ def test_should_rewrite_respects_threshold() -> None:
     assert rw.should_rewrite(_item(None)) is False  # unscored
 
 
-def test_rewrite_applies_drafts() -> None:
-    raw = {"recommended_title": "T", "tags": ["a"],
-           "drafts": {"小红书": "x", "公众号": "y", "B站": "z"}}
+def test_rewrite_applies_platform_posts() -> None:
+    raw = {
+        "recommended_title": "T",
+        "tags": ["a"],
+        "platforms": {
+            "小红书": {"title": "xt", "body": "xb"},
+            "知乎": {"title": "zt", "body": "zb"},
+            "B站": {"title": "bt", "body": "bb"},
+        },
+    }
     rw = Rewriter("strong", threshold=70, client=FakeChatClient([raw]),
                   temperature=0.4, timeout=10)
     result = rw.rewrite(_item(85))
     assert result.recommended_title == "T"
-    assert result.drafts == {"小红书": "x", "公众号": "y", "B站": "z"}
+    assert result.platform_posts["小红书"]["title"] == "xt"
+    assert result.drafts == {"小红书": "xb", "知乎": "zb", "B站": "bb"}
+    assert result.has_publish_content is True
     assert rw._client.calls[0]["model"] == "strong"  # type: ignore[attr-defined]
 
 
 def test_rewrite_all_skips_low_score_and_degrades() -> None:
     rw = Rewriter("strong", threshold=70,
                   client=FakeChatClient([
-                      {"drafts": {"小红书": "ok"}},          # for the 85 item
-                      ValueError("boom"),                    # for the 90 item
+                      {"platforms": {"小红书": {"title": "t", "body": "ok"}}},
+                      ValueError("boom"),
                   ]),
                   timeout=10)
     results = rw.rewrite_all([_item(50), _item(85), _item(90)])
-    assert results[0].drafts == {}        # below threshold, untouched
+    assert results[0].has_publish_content is False
     assert results[1].drafts == {"小红书": "ok"}
-    assert results[2].drafts == {}        # failed -> unchanged
+    assert results[2].has_publish_content is False
     assert rw.aborted is False
 
 
@@ -78,11 +112,11 @@ def test_rewrite_all_aborts_on_auth_error() -> None:
     from analysis.ai_client import AIAuthError
     client = FakeChatClient([
         AIAuthError("401"),
-        {"drafts": {"小红书": "never"}},
+        {"platforms": {"小红书": {"title": "n", "body": "never"}}},
     ])
     rw = Rewriter("strong", threshold=70, client=client, timeout=10)
     results = rw.rewrite_all([_item(80), _item(90)])
-    assert results[0].drafts == {}
-    assert results[1].drafts == {}
+    assert results[0].has_publish_content is False
+    assert results[1].has_publish_content is False
     assert rw.aborted is True
     assert len(client.calls) == 1

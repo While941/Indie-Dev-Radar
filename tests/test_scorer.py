@@ -90,7 +90,7 @@ def test_parse_maps_and_validates() -> None:
         "category": "Godot 插件", "tags": ["2D", "TileMap"],
         "risk_level": "中", "one_line_summary": "好用",
         "recommended_action": "发布",
-        "recommended_platforms": ["小红书", "TikTok", "公众号"],
+        "recommended_platforms": ["小红书", "TikTok", "知乎"],
         "target_audience": "Godot 开发者",
     }
     parsed = parse_score_response(raw, DEFAULT_WEIGHTS)
@@ -98,7 +98,7 @@ def test_parse_maps_and_validates() -> None:
     assert parsed["tags"] == ("2D", "TileMap")
     assert parsed["risk_level"] == "中"
     assert parsed["recommended_action"] == "发布"
-    assert parsed["recommended_platforms"] == ("小红书", "公众号")  # TikTok filtered
+    assert parsed["recommended_platforms"] == ("小红书", "知乎")  # TikTok filtered
     assert parsed["score"] == pytest.approx(72.0, abs=0.1)
 
 

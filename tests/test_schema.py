@@ -36,9 +36,13 @@ def test_item_to_fields_keys_are_all_in_schema() -> None:
         dimensions={"relevance": 8, "utility": 7, "freshness": 6, "popularity": 5,
                     "differentiation": 4, "biz_value": 3, "risk": 1},
         score=80.0, risk_level="中",
-        one_line_summary="o", recommended_action="发布", recommended_platforms=("小红书",),
+        one_line_summary="o", recommended_action="发布", recommended_platforms=("小红书", "知乎"),
         target_audience="t", recommended_title="ti",
-        drafts={"小红书": "x", "公众号": "y", "B站": "z"},
+        platform_posts={
+            "小红书": {"title": "xt", "body": "xb"},
+            "知乎": {"title": "zt", "body": "zb"},
+            "B站": {"title": "bt", "body": "bb"},
+        },
     )
     extra = set(item_to_fields(item)) - FIELD_NAMES
     assert not extra, f"item_to_fields emits unknown fields: {extra}"

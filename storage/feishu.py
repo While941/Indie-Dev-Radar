@@ -27,7 +27,7 @@ from models.item import IntelligenceItem
 from .feishu_schema import (  # shared schema (single source of truth)
     DIMENSION_LABELS,
     DIMENSIONS_FIELD,
-    DRAFT_FIELDS,
+    PLATFORM_CONTENT_FIELDS,
     URL_FIELD,
 )
 
@@ -131,10 +131,14 @@ def item_to_fields(item: IntelligenceItem) -> dict[str, Any]:
         fields["推荐发布平台"] = list(item.recommended_platforms)
     if item.recommended_title:
         fields["推荐标题"] = item.recommended_title
-    for label, field_name in DRAFT_FIELDS.items():
-        draft = item.drafts.get(label)
-        if draft:
-            fields[field_name] = draft
+    for platform, (title_field, body_field) in PLATFORM_CONTENT_FIELDS.items():
+        post = item.platform_posts.get(platform) or {}
+        title = (post.get("title") or "").strip()
+        body = (post.get("body") or item.drafts.get(platform) or "").strip()
+        if title:
+            fields[title_field] = title
+        if body:
+            fields[body_field] = body
 
     published_ms = _to_ms(item.published_at)
     if published_ms is not None:

@@ -116,7 +116,7 @@ class Pipeline:
             new_after_dedup=new_after_dedup,
             processed=len(items),
             scored=scored_count,
-            rewritten=sum(1 for i in items if i.drafts),
+            rewritten=sum(1 for i in items if i.has_publish_content),
             pushed=pushed,
             ai_aborted=ai_aborted,
             items=items,
@@ -142,7 +142,13 @@ class Pipeline:
                 self.out(f"     → {it.one_line_summary}")
             if it.recommended_action:
                 self.out(f"     action: {it.recommended_action}")
-            if it.drafts:
+            if it.platform_posts:
+                for plat, post in it.platform_posts.items():
+                    t = (post.get("title") or "").strip()
+                    b = (post.get("body") or "").strip()
+                    preview = (b[:40] + "…") if len(b) > 40 else b
+                    self.out(f"     [{plat}] {t or '（无标题）'} | {preview or '（无正文）'}")
+            elif it.drafts:
                 self.out(f"     drafts: {', '.join(it.drafts)}")
             self.out(f"     {it.source_url}\n")
 
