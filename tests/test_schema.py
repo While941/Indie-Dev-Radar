@@ -59,4 +59,5 @@ def test_field_payload_single_select_has_options() -> None:
     assert payload["type"] == int(FieldType.SINGLE_SELECT)
     assert payload["property"]["options"] == [
         {"name": "GitHub"}, {"name": "HackerNews"}, {"name": "Godot"},
+        {"name": "日贴"}, {"name": "周贴"},
     ]

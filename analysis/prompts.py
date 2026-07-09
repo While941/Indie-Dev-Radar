@@ -94,3 +94,62 @@ def build_rewrite_user(item: IntelligenceItem) -> str:
         audience=item.target_audience or "独立游戏开发者",
         url=item.source_url,
     )
+
+
+# --- Digest: daily / weekly multi-item packages --------------------------
+
+DIGEST_SYSTEM = (
+    "你是独立游戏开发领域的情报主编。把多条候选情报整理成可直接复制发布的日贴/周贴，"
+    "有判断、有取舍、语气专业口语化，禁止营销腔和空话。"
+    "输出必须可直接粘贴到小红书/知乎/B站，无需人工再润色。"
+    "严格只输出一个 JSON 对象。"
+)
+
+DIGEST_USER_TEMPLATE = """请将下列情报整理成一份「{kind}」（{period}）。
+
+候选情报（已按相关度/评分筛选）：
+{bullet_list}
+
+要求：
+1. 不要逐条照搬，要有主编视角：挑重点、归类、写清「对独立游戏开发者有什么用」。
+2. 保留关键出处链接（用候选里的 URL）。
+3. 三个平台文案结构不同，但信息一致；标题不要完全相同。
+4. 文案必须完整可发：不要「此处省略」「待补充」。
+
+严格输出 JSON：
+- recommended_title(字符串): 通用总标题（<=30字）
+- tags(字符串数组): 4-8 个中文标签
+- platforms(对象): 键固定 "小红书"/"知乎"/"B站"，值 {{"title","body"}}
+  - 小红书: title<=20字；body 400-800字，分点+emoji，开头抓人，结尾收藏引导
+  - 知乎: title 问题/判断式<=40字；body 1000-2000字，分小节，有观点
+  - B站: title 钩子<=30字；body 150-400字口语动态，可带话题
+{kind_hint}
+"""
+
+KIND_HINTS = {
+    "日贴": "这是「今日速览」：条数少、节奏快，突出今天最值得点的 3–6 条。",
+    "周贴": "这是「本周精选」：可分组（工具/插件/开源/趋势），做周回顾与下周可行动建议。",
+}
+
+
+def build_digest_user(
+    *,
+    kind: str,
+    period: str,
+    items: list[IntelligenceItem],
+) -> str:
+    lines: list[str] = []
+    for i, it in enumerate(items, 1):
+        score = f"{it.score:.0f}" if it.score is not None else "?"
+        summary = (it.one_line_summary or it.summary_raw or "（无摘要）").strip()[:200]
+        lines.append(
+            f"{i}. [{it.source}|{score}分] {it.title}\n"
+            f"   摘要: {summary}\n"
+            f"   分类: {it.category or '未分类'} | 链接: {it.source_url}"
+        )
+    return DIGEST_USER_TEMPLATE.format(
+        kind=kind,
+        period=period,
+        bullet_list="\n".join(lines) if lines else "（无候选，请礼貌说明暂无高价值情报）",
+        kind_hint=KIND_HINTS.get(kind, ""),
+    )

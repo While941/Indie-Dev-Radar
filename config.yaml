@@ -33,20 +33,30 @@ scoring:
     differentiation: 0.10
     biz_value: 0.10
     risk: 0.10
-  # Items with score >= threshold get strong-model multi-platform drafts.
+  # Items with score >= threshold enter 日贴/周贴 candidate pool.
   score_threshold: 70
 
 # Cap items after dedup when CLI --limit is not set (cost control).
 max_items_per_run: 40
+
+# Daily / weekly digests: AI-written, human copy-pastes to publish (no auto-post).
+digest:
+  daily_enabled: true
+  weekly_enabled: false          # enable via --weekly or set true on weekly cron
+  max_items_daily: 8
+  max_items_weekly: 15
+  weekly_lookback_days: 7
+  rewrite_per_item: false        # per-item long posts are expensive; digests are primary
+  output_dir: "output"           # HTML/MD with one-click copy buttons
 
 ai:
   # Default: DeepSeek official OpenAI-compatible endpoint.
   # Override at deploy time with AI_BASE_URL in .env / GitHub Secrets.
   base_url: "https://api.deepseek.com"
   cheap_model: "deepseek-chat"    # triage + per-dimension scoring
-  strong_model: "deepseek-chat"   # high-value rewrite (or deepseek-reasoner)
+  strong_model: "deepseek-chat"   # digests + optional per-item rewrite
   temperature: 0.2
-  timeout_seconds: 60
+  timeout_seconds: 90
 
 feishu:
   app_token: "${FEISHU_APP_TOKEN}"

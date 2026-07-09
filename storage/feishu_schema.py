@@ -42,7 +42,9 @@ PLATFORM_CONTENT_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 FIELDS: tuple[FieldSpec, ...] = (
-    FieldSpec("来源", FieldType.SINGLE_SELECT, ("GitHub", "HackerNews", "Godot")),
+    FieldSpec("来源", FieldType.SINGLE_SELECT,
+              ("GitHub", "HackerNews", "Godot", "日贴", "周贴")),
+    FieldSpec("内容类型", FieldType.SINGLE_SELECT, ("单条情报", "日贴", "周贴")),
     FieldSpec(URL_FIELD, FieldType.TEXT),
     FieldSpec(PRIMARY_FIELD, FieldType.TEXT),
     FieldSpec("原始摘要", FieldType.TEXT),

@@ -25,6 +25,9 @@ state/
 *.log
 run.log
 
+# Generated copy-ready digests (HTML/MD)
+output/
+
 # OS / editor
 .DS_Store
 Thumbs.db

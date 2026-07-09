@@ -103,8 +103,15 @@ def format_dimensions(dimensions: dict[str, float]) -> str:
 
 def item_to_fields(item: IntelligenceItem) -> dict[str, Any]:
     """Map an ``IntelligenceItem`` to a Feishu ``fields`` payload."""
+    content_type = "单条情报"
+    if item.source in {"日贴", "周贴"}:
+        content_type = item.source
+    elif item.category in {"日贴", "周贴"}:
+        content_type = item.category
+
     fields: dict[str, Any] = {
         "来源": item.source,
+        "内容类型": content_type,
         "原始链接": item.source_url,
         "标题": item.title,
         "风险等级": item.risk_level,
@@ -280,6 +287,73 @@ class FeishuClient(FeishuAuth):
             len(urls), self._dedup_lookback_days or "all",
         )
         return urls
+
+    def list_scored_candidates(
+        self,
+        *,
+        days: int = 7,
+        min_score: float = 0.0,
+        url_field: str = URL_FIELD,
+    ) -> list[IntelligenceItem]:
+        """Load single-item intelligence rows for weekly digest assembly.
+
+        Skips 日贴/周贴 package rows. Best-effort reconstruction from Feishu fields.
+        """
+        now = self._now or datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=max(1, days))
+        out: list[IntelligenceItem] = []
+        for rec in self._iter_records():
+            fields = rec.get("fields") or {}
+            source = str(fields.get("来源") or "").strip()
+            if source in {"日贴", "周贴"}:
+                continue
+            content_type = str(fields.get("内容类型") or "").strip()
+            if content_type in {"日贴", "周贴"}:
+                continue
+            fetched = _parse_feishu_ms(fields.get(FETCHED_AT_FIELD))
+            if fetched is not None and fetched < cutoff:
+                continue
+            url = _extract_url(fields.get(url_field))
+            if not url or url.startswith("digest://"):
+                continue
+            score_val = fields.get("AI 评分")
+            try:
+                score = float(score_val) if score_val is not None and score_val != "" else None
+            except (TypeError, ValueError):
+                score = None
+            if score is None or score < min_score:
+                continue
+            title = str(fields.get("标题") or url).strip()
+            summary = str(fields.get("一句话总结") or fields.get("原始摘要") or "").strip()
+            action = str(fields.get("推荐动作") or "待审核").strip() or "待审核"
+            if action == "删除":
+                continue
+            category = fields.get("分类")
+            cat = str(category).strip() if category else None
+            out.append(IntelligenceItem(
+                source=source or "Unknown",
+                source_url=url,
+                title=title,
+                summary_raw=str(fields.get("原始摘要") or summary),
+                author=str(fields.get("作者") or "") or None,
+                published_at=_parse_feishu_ms(fields.get("发布时间")),
+                fetched_at=fetched or now,
+                score_raw={},
+                category=cat,
+                score=score,
+                one_line_summary=summary or None,
+                recommended_action=action,
+                risk_level=str(fields.get("风险等级") or "低"),
+            ))
+        # Dedup by URL, keep higher score
+        best: dict[str, IntelligenceItem] = {}
+        for it in out:
+            prev = best.get(it.source_url)
+            if prev is None or (it.score or 0) > (prev.score or 0):
+                best[it.source_url] = it
+        items = sorted(best.values(), key=lambda x: x.score or 0.0, reverse=True)
+        log.info("Feishu: %d scored candidates in last %d days", len(items), days)
+        return items
 
     def clear_all(self) -> int:
         """Delete every record in the table. Returns the count deleted."""

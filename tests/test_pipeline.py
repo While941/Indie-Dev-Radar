@@ -88,11 +88,12 @@ def test_dry_run_prints_items_without_pushing() -> None:
     pipe = Pipeline(
         collectors=[FakeCollector([
             _item("u1"),
-            _item("u2", one_line_summary="一句话", recommended_action="发布",
+            _item("u2", one_line_summary="一句话", score=80.0,
                   platform_posts={"小红书": {"title": "题", "body": "正文很长很长很长很长很长很长很长"}},
                   drafts={"小红书": "正文很长很长很长很长很长很长很长"}),
         ])],
         out=lines.append,
+        daily_enabled=False,
     )
     result = pipe.run(dry_run=True)
 
@@ -102,8 +103,6 @@ def test_dry_run_prints_items_without_pushing() -> None:
     assert any("u1" in line for line in lines)
     assert any("dry-run" in line for line in lines)
     assert any("一句话" in line for line in lines)
-    assert any("发布" in line for line in lines)
-    assert any("[小红书]" in line for line in lines)
 
 
 def test_dedup_uses_feishu_seen_urls_on_push_path() -> None:
@@ -259,7 +258,8 @@ def test_build_pipeline_with_secrets_enables_ai_and_feishu(tmp_path: Path,
     pipe = build_pipeline(cfg, client=httpx.Client())
 
     assert pipe.scorer is not None
-    assert pipe.rewriter is not None
+    assert pipe.rewriter is None              # rewrite_per_item default false
+    assert pipe.digest_builder is not None
     assert pipe.feishu is not None
 
 
@@ -289,7 +289,8 @@ def test_main_dry_run_returns_zero(tmp_path: Path, monkeypatch) -> None:
     class _FakePipe:
         collectors: list = []
 
-        def run(self, *, dry_run: bool = False, limit: int | None = None) -> PipelineResult:
+        def run(self, *, dry_run: bool = False, limit: int | None = None,
+                weekly: bool | None = None) -> PipelineResult:
             captured["dry_run"] = dry_run
             captured["limit"] = limit
             return PipelineResult(collected=1, new_after_dedup=1, processed=1)
@@ -306,7 +307,8 @@ def test_main_returns_one_on_ai_abort(tmp_path: Path, monkeypatch) -> None:
         collectors: list = []
         feishu = None
 
-        def run(self, *, dry_run: bool = False, limit: int | None = None) -> PipelineResult:
+        def run(self, *, dry_run: bool = False, limit: int | None = None,
+                weekly: bool | None = None) -> PipelineResult:
             return PipelineResult(collected=3, new_after_dedup=3, ai_aborted=True)
 
     monkeypatch.setattr("pipeline.build_pipeline", lambda cfg, **kw: _FakePipe())

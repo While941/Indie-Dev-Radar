@@ -81,7 +81,9 @@ def test_provision_sends_select_options() -> None:
 
     laiyuan = next(b for b in bodies if b.get("field_name") == "来源")
     assert laiyuan["type"] == 3
-    assert [o["name"] for o in laiyuan["property"]["options"]] == ["GitHub", "HackerNews", "Godot"]
+    assert [o["name"] for o in laiyuan["property"]["options"]] == [
+        "GitHub", "HackerNews", "Godot", "日贴", "周贴",
+    ]
 
 
 @respx.mock

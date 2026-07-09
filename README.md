@@ -1,114 +1,123 @@
 # Indie-Dev-Radar
 
-独立游戏开发者情报半自动化系统 — 自动采集（GitHub / Hacker News / Godot Asset Library）→ AI 打分摘要 → 高分内容生成多平台草稿 → 推送到飞书多维表格的「待审核」队列，人工复核后复制发布。
+独立游戏开发者情报半自动化系统：
 
-详见 [`Plan.md`](./Plan.md)。本 README 只讲怎么跑。
+**自动采集 → AI 打分 → AI 整理「日贴 / 周贴」→ 本地一键复制标题与正文 → 你只做审核与手动发布。**
+
+不做各平台自动发帖（降低封号与合规风险）。人工唯一必要操作：打开导出的 HTML，点「一键复制」，粘贴到小红书 / 知乎 / B站。
 
 ## 架构
 
 ```
-GitHub Actions (cron 每日 09:00 北京 + 手动 workflow_dispatch)
-   └─ pipeline.py: 采集 → 去重 → 便宜模型打分 → 强模型重写高分 → 推送飞书
+GitHub Actions / 本地 pipeline
+  采集 (GitHub · HN · Godot)
+    → 去重 (飞书 source_url)
+    → 便宜模型打分
+    → 强模型生成「日贴」(可选「周贴」)
+    → 导出 output/*.html（一键复制）+ 推送飞书备查
 ```
-
-- **编排**：Python + GitHub Actions（免费、无服务器）。
-- **存储与审核**：飞书多维表格（唯一数据源，按 `source_url` 去重；默认只看最近 `dedup_lookback_days` 天）。
-- **AI**：OpenAI 兼容接口，默认 [DeepSeek 官方 API](https://api-docs.deepseek.com/)（`deepseek-chat`）。鉴权失败会熔断本轮，避免空打；只推送**已评分**且推荐动作不是「删除」的记录。
 
 ## 本地开发
 
-需要 Python 3.9+。**Windows 用 `py` 启动器**（本机 `python` 是商店占位符，不可用）；macOS/Linux 用 `python3`/`pip`。推荐建虚拟环境：
+需要 Python 3.9+。Windows 推荐 `py` 启动器：
 
 ```bash
 py -m venv .venv
-.venv\Scripts\activate          # Windows
+.venv\Scripts\activate
 py -m pip install -r requirements-dev.txt
-```
-
-复制密钥模板并填写（至少 `AI_API_KEY`；有 `GH_TOKEN` 时 GitHub 搜索限额更高）：
-
-```bash
 copy .env.example .env
-# 编辑 .env
+# 填写 AI_API_KEY（DeepSeek）等
 ```
 
-`.env` 关键项：
-
-| 变量 | 说明 |
-|------|------|
-| `AI_API_KEY` | DeepSeek API Key（在 [platform.deepseek.com](https://platform.deepseek.com/) 申请） |
-| `AI_BASE_URL` | 默认 `https://api.deepseek.com` |
-| `GH_TOKEN` | 可选，GitHub token |
-| `FEISHU_*` | 飞书自建应用与多维表格凭证 |
-
-### Dry-run（采集 + 打分 + 打印，不写入飞书）
-
-若已配置飞书，dry-run **仍会只读去重**（拉取已有 `source_url`），只是不 `batch_create`：
+### 跑日贴（推荐）
 
 ```bash
-py pipeline.py --dry-run
-py pipeline.py --dry-run --limit 3   # 限制条数，省 AI 费用
+py pipeline.py --dry-run --limit 15
 ```
 
-### 真实推送（需配齐飞书凭证）
+生成文件示例：
+
+- `output/日贴-YYYY-MM-DD.html` — **浏览器打开，点「一键复制标题/正文」**
+- `output/latest-daily.html` — 最新日贴快捷入口
+- 同名 `.md` 便于归档
+
+### 额外生成周贴
+
+```bash
+py pipeline.py --weekly --limit 20
+```
+
+周贴会尽量从飞书近 N 天已评分条目中汇总（需飞书凭证）。
+
+### 真实写入飞书
 
 ```bash
 py pipeline.py
 ```
 
-默认最多处理 `config.yaml` 里的 `max_items_per_run`（当前 40）条；可用 `--limit N` 覆盖。
+## 你怎么用（人工只做这些）
+
+1. 每天跑（或等 GitHub Actions）。
+2. 浏览器打开 `output/latest-daily.html`。
+3. 对小红书 / 知乎 / B站：点 **一键复制标题** → 粘贴；再 **一键复制正文** → 粘贴发布。
+4. （可选）在飞书把对应「日贴/周贴」行的推荐动作改成「已发布」，填已发布链接。
+
+单条情报仍会进飞书备查；**默认不再为每条单独写长文**（`digest.rewrite_per_item: false`），以日贴/周贴为主，省费用。
 
 ## 测试
 
 ```bash
-py -m pytest                        # 全部测试
-py -m pytest --cov                  # 带覆盖率（目标 ≥ 80%）
+py -m pytest
+py -m pytest --cov
 ```
 
-## 飞书多维表格准备（一键建表）
+## 飞书
 
-1. 在飞书创建一个「自建应用」，拿到 `app_id` / `app_secret`，授予 `bitable:app` 权限（创建多维表格 + 读写记录）。
-2. 把凭证填入 `.env`（`FEISHU_APP_ID` / `FEISHU_APP_SECRET`）。
-3. 运行一键建表脚本：
+一键建表：
 
-   ```bash
-   py setup_feishu_table.py --dry-run    # 先预览字段（不调 API）
-   py setup_feishu_table.py              # 真正创建 app + 表 + 字段
-   ```
+```bash
+py setup_feishu_table.py --dry-run
+py setup_feishu_table.py
+```
 
-   脚本会打印 `FEISHU_APP_TOKEN` 与 `FEISHU_TABLE_ID`，把它们填回 `.env` / GitHub Secrets。
-4. 把该自建应用添加进新建的多维表格（右上角「…」→「添加文档应用」），授予读写权限，应用才能每日写入。
+### 已有表请增量添加
 
-> 字段定义集中在 `storage/feishu_schema.py`（唯一真相源），`storage/feishu.py` 的写入映射与建表脚本都引用它；改字段只需改一处，并有单测保证两边不漂移。
+| 字段 | 类型 |
+|------|------|
+| 内容类型 | 单选：单条情报 / 日贴 / 周贴 |
+| 维度评分 | 文本 |
+| 小红书标题 / 小红书正文 | 文本 |
+| 知乎标题 / 知乎正文 | 文本 |
+| B站标题 / B站正文 | 文本 |
 
-### 已有表的增量字段
+「来源」增加选项：日贴、周贴。  
+「推荐发布平台」：小红书、知乎、B站。
 
-若表是旧版 schema 建的，请在多维表格中**手工新增**下列文本字段（名称必须一致）：
+表格链接示例（把 token 换成你的 `.env`）：
 
-| 字段名 | 类型 |
-|--------|------|
-| `维度评分` | 多行文本 |
-| `小红书标题` | 多行文本 |
-| `小红书正文` | 多行文本 |
-| `知乎标题` | 多行文本 |
-| `知乎正文` | 多行文本 |
-| `B站标题` | 多行文本 |
-| `B站正文` | 多行文本 |
-
-并在「推荐发布平台」多选中增加选项 **知乎**（可去掉不再使用的「公众号」）。推荐动作可选增加 **发布失败**（给后续自动发布用）。
-
-缺少字段时 `batch_create` 可能整批失败。新跑 `setup_feishu_table.py` 建的表已包含完整字段。
-
-### 审核时看什么（内容）
-
-高分条目（默认 ≥ `score_threshold`）会生成分平台 **标题 + 正文**，写入上表列。你只需在飞书改「推荐动作」（通过/暂存/删除等）；后续发布 Worker（未实现）将读取这些列自动发帖。
+`https://feishu.cn/base/<FEISHU_APP_TOKEN>?table=<FEISHU_TABLE_ID>`
 
 ## GitHub Actions
 
-`.github/workflows/daily-collect.yml` 每天 UTC 01:00（北京 09:00）自动运行，也可在 Actions 页面手动触发（`workflow_dispatch`）。需在仓库 Settings → Secrets 配置：`GH_TOKEN`、`AI_API_KEY`、`AI_BASE_URL`（建议 `https://api.deepseek.com`）、`FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_APP_TOKEN`、`FEISHU_TABLE_ID`。
+`.github/workflows/daily-collect.yml`：每天 UTC 01:00（北京 09:00）。  
+Secrets：`GH_TOKEN`、`AI_API_KEY`、`AI_BASE_URL=https://api.deepseek.com`、飞书四件套。
 
-AI 鉴权失败或本轮 0 条有效打分时，进程以非 0 退出，便于 Actions 标红。
+Actions 产物默认在 runner 上；本地或自托管更适合保存 `output/` HTML。若需要可后续加 artifact 上传。
+
+## 配置要点（`config.yaml`）
+
+```yaml
+digest:
+  daily_enabled: true
+  weekly_enabled: false   # 或用 --weekly
+  max_items_daily: 8
+  max_items_weekly: 15
+  rewrite_per_item: false
+  output_dir: "output"
+scoring:
+  score_threshold: 70     # 进入日贴/周贴候选的最低分
+```
 
 ## 合规
 
-只用官方公开 API，保留原始来源链接，AI 输出标注为草稿、人工审核为必经环节。详见 `Plan.md` §8.F / §12。
+只用公开 API 采集；发布由你在官方 App/网页完成；文案保留出处链接。详见 `Plan.md`。

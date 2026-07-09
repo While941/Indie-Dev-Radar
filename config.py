@@ -87,11 +87,34 @@ class FeishuConfig:
 
 
 @dataclass(frozen=True)
+class DigestConfig:
+    """Daily / weekly copy-ready packages (human publishes manually)."""
+
+    daily_enabled: bool
+    weekly_enabled: bool
+    max_items_daily: int
+    max_items_weekly: int
+    weekly_lookback_days: int
+    # When True, still generate per-item platform posts (expensive; usually off).
+    rewrite_per_item: bool
+    output_dir: str
+
+
+@dataclass(frozen=True)
 class Config:
     sources: SourcesConfig
     scoring: ScoringConfig
     ai: AIConfig
     feishu: FeishuConfig
+    digest: DigestConfig = field(default_factory=lambda: DigestConfig(
+        daily_enabled=True,
+        weekly_enabled=False,
+        max_items_daily=8,
+        max_items_weekly=15,
+        weekly_lookback_days=7,
+        rewrite_per_item=False,
+        output_dir="output",
+    ))
     max_items_per_run: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
@@ -182,6 +205,17 @@ def _build_config(data: dict[str, Any]) -> Config:
         dedup_lookback_days=int(fs_raw.get("dedup_lookback_days", 14)),
     )
 
+    dg_raw = data.get("digest", {}) or {}
+    digest = DigestConfig(
+        daily_enabled=_as_bool(dg_raw.get("daily_enabled", True)),
+        weekly_enabled=_as_bool(dg_raw.get("weekly_enabled", False)),
+        max_items_daily=int(dg_raw.get("max_items_daily", 8)),
+        max_items_weekly=int(dg_raw.get("max_items_weekly", 15)),
+        weekly_lookback_days=int(dg_raw.get("weekly_lookback_days", 7)),
+        rewrite_per_item=_as_bool(dg_raw.get("rewrite_per_item", False)),
+        output_dir=str(dg_raw.get("output_dir", "output")),
+    )
+
     max_raw = data.get("max_items_per_run")
     max_items: int | None
     if max_raw is None or max_raw == "":
@@ -196,6 +230,7 @@ def _build_config(data: dict[str, Any]) -> Config:
         scoring=scoring,
         ai=ai,
         feishu=feishu,
+        digest=digest,
         max_items_per_run=max_items,
         raw=data,
     )

@@ -49,6 +49,13 @@ feishu:
   dedup_lookback_days: 7
 
 max_items_per_run: 40
+
+digest:
+  daily_enabled: true
+  weekly_enabled: false
+  max_items_daily: 5
+  rewrite_per_item: false
+  output_dir: "out-test"
         """,
         encoding="utf-8",
     )
@@ -70,6 +77,10 @@ def test_loads_typed_config(cfg_path: Path) -> None:
     assert cfg.ai.cheap_model == "cheap"
     assert cfg.feishu.dedup_lookback_days == 7
     assert cfg.max_items_per_run == 40
+    assert cfg.digest.daily_enabled is True
+    assert cfg.digest.max_items_daily == 5
+    assert cfg.digest.rewrite_per_item is False
+    assert cfg.digest.output_dir == "out-test"
 
 
 def test_env_var_expansion(cfg_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

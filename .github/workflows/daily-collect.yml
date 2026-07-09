@@ -1,16 +1,22 @@
 name: daily-collect
 
-# Collects intelligence, scores with AI, rewrites high-value items, and pushes
-# the "待审核" queue to a Feishu Bitable. Runs daily at Beijing 09:00
-# (UTC 01:00) and on demand via workflow_dispatch.
+# Collects intelligence, scores with AI, builds 日贴 (optional 周贴), exports
+# copy-ready HTML, and pushes to Feishu for archive. Human publishes manually.
+# Daily at Beijing 09:00 (UTC 01:00); Monday also builds 周贴.
 
 on:
   schedule:
-    - cron: "0 1 * * *"          # UTC 01:00 == Beijing 09:00
+    - cron: "0 1 * * *"          # UTC 01:00 == Beijing 09:00 daily
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Dry run (collect + score + print, no Feishu push)"
+        description: "Dry run (no Feishu push)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+      weekly:
+        description: "Also generate 周贴"
         required: false
         default: "false"
         type: choice
@@ -52,5 +58,17 @@ jobs:
           FEISHU_TABLE_ID: ${{ secrets.FEISHU_TABLE_ID }}
         run: |
           ARGS=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          # Monday UTC after cron, or manual weekly flag
+          DOW=$(date -u +%u)
+          if [ "${{ github.event.inputs.weekly }}" = "true" ] || [ "$DOW" = "1" ]; then
+            ARGS="$ARGS --weekly"
+          fi
           python pipeline.py $ARGS
+      - name: Upload digest HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests
+          path: output/
+          if-no-files-found: ignore
