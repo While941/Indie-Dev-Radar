@@ -1,0 +1,56 @@
+# Indie-Dev-Radar configuration. Non-secret structure lives here.
+# Secret values are referenced as ${VAR} and expanded from environment / .env.
+
+sources:
+  github:
+    enabled: true
+    # Base keyword query; the collector appends rolling `pushed:>` and `stars:>` filters.
+    query: "godot OR gamedev OR roguelike OR indie-game OR pixel-art OR aseprite"
+    pushed_within_days: 14
+    min_stars: 30
+    per_page: 30
+
+  hackernews:
+    enabled: true
+    lists: ["topstories", "showstories"]   # which HN story lists to pull
+    top_n: 20                              # items per list before filtering
+
+  godot:
+    enabled: true
+    godot_version: "4.x"
+    sort: "updated"                        # updated | new | name | cost
+    max_results: 30
+
+scoring:
+  # Plan.md formula. Each dimension rated 0–10 by the cheap model.
+  # `risk` is a deduction. Score is normalised by the sum of positive weights
+  # inside compute_score (no separate load-time normalisation).
+  weights:
+    relevance: 0.30
+    utility: 0.25
+    freshness: 0.15
+    popularity: 0.10
+    differentiation: 0.10
+    biz_value: 0.10
+    risk: 0.10
+  # Items with score >= threshold get strong-model multi-platform drafts.
+  score_threshold: 70
+
+# Cap items after dedup when CLI --limit is not set (cost control).
+max_items_per_run: 40
+
+ai:
+  # Default: DeepSeek official OpenAI-compatible endpoint.
+  # Override at deploy time with AI_BASE_URL in .env / GitHub Secrets.
+  base_url: "https://api.deepseek.com"
+  cheap_model: "deepseek-chat"    # triage + per-dimension scoring
+  strong_model: "deepseek-chat"   # high-value rewrite (or deepseek-reasoner)
+  temperature: 0.2
+  timeout_seconds: 60
+
+feishu:
+  app_token: "${FEISHU_APP_TOKEN}"
+  table_id: "${FEISHU_TABLE_ID}"
+  # Only treat source_urls from records with 抓取时间 within this many days
+  # as already-seen. Records with no 抓取时间 are always treated as seen.
+  dedup_lookback_days: 14

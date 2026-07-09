@@ -1,0 +1,56 @@
+name: daily-collect
+
+# Collects intelligence, scores with AI, rewrites high-value items, and pushes
+# the "待审核" queue to a Feishu Bitable. Runs daily at Beijing 09:00
+# (UTC 01:00) and on demand via workflow_dispatch.
+
+on:
+  schedule:
+    - cron: "0 1 * * *"          # UTC 01:00 == Beijing 09:00
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (collect + score + print, no Feishu push)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-collect
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ secrets.AI_BASE_URL }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_APP_TOKEN: ${{ secrets.FEISHU_APP_TOKEN }}
+          FEISHU_TABLE_ID: ${{ secrets.FEISHU_TABLE_ID }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="--dry-run"; fi
+          python pipeline.py $ARGS
