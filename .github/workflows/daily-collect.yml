@@ -1,12 +1,17 @@
 name: daily-collect
 
-# Collects intelligence, scores with AI, builds 日贴 (optional 周贴), exports
-# copy-ready HTML, and pushes to Feishu for archive. Human publishes manually.
-# Daily at Beijing 09:00 (UTC 01:00); Monday also builds 周贴.
+# Collects intelligence, scores with AI, builds 日贴/AI日贴 (and weekly variants),
+# exports copy-ready HTML, and pushes to Feishu for archive. Human publishes manually.
+#
+# Schedules (Asia/Shanghai = UTC+8, no DST):
+#   - Daily 10:00 Beijing  → UTC 02:00  → 日贴 + AI日贴
+#   - Friday 16:00 Beijing → UTC 08:00  → 周贴 + AI周贴 only (--weekly --weekly-only)
+# Note: GitHub Actions free-tier schedules may drift by several minutes.
 
 on:
   schedule:
-    - cron: "0 1 * * *"          # UTC 01:00 == Beijing 09:00 daily
+    - cron: "0 2 * * *"          # UTC 02:00 == Beijing 10:00 daily
+    - cron: "0 8 * * 5"          # UTC 08:00 Fri == Beijing 16:00 weekly
   workflow_dispatch:
     inputs:
       dry_run:
@@ -16,7 +21,7 @@ on:
         type: choice
         options: ["false", "true"]
       weekly:
-        description: "Also generate 周贴"
+        description: "Weekly-only run (周贴 + AI周贴, skip daily digests)"
         required: false
         default: "false"
         type: choice
@@ -59,10 +64,11 @@ jobs:
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
-          # Monday UTC after cron, or manual weekly flag
+          # Friday 08:00 UTC schedule, or manual weekly flag → weekly-only
           DOW=$(date -u +%u)
-          if [ "${{ github.event.inputs.weekly }}" = "true" ] || [ "$DOW" = "1" ]; then
-            ARGS="$ARGS --weekly"
+          HOUR=$(date -u +%H)
+          if [ "${{ github.event.inputs.weekly }}" = "true" ] || { [ "$DOW" = "5" ] && [ "$HOUR" = "08" ]; }; then
+            ARGS="$ARGS --weekly --weekly-only"
           fi
           python pipeline.py $ARGS
       - name: Upload digest HTML

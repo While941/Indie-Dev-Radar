@@ -270,6 +270,7 @@ def test_build_pipeline_enables_all_configured_sources(tmp_path: Path,
     path.write_text("""
 sources:
   github: {enabled: true, query: godot, pushed_within_days: 14, min_stars: 30, per_page: 20}
+  github_ai: {enabled: true, query: "llm game", pushed_within_days: 14, min_stars: 20, per_page: 20}
   hackernews: {enabled: true, lists: [topstories], top_n: 5}
   godot: {enabled: true, godot_version: "4.x", sort: updated, max_results: 5}
 scoring: {weights: {relevance: 0.3, risk: 0.1}, score_threshold: 70}
@@ -281,6 +282,11 @@ feishu: {app_token: "", table_id: "", dedup_lookback_days: 7}
 
     types = {type(c).__name__ for c in pipe.collectors}
     assert types == {"GodotCollector", "HackerNewsCollector", "GitHubCollector"}
+    # two GitHubCollector instances (gamedev + AI track)
+    assert sum(1 for c in pipe.collectors if isinstance(c, GitHubCollector)) == 2
+    labels = {getattr(c, "_source_label", None) for c in pipe.collectors
+              if isinstance(c, GitHubCollector)}
+    assert labels == {"GitHub", "GitHubAI"}
 
 
 def test_main_dry_run_returns_zero(tmp_path: Path, monkeypatch) -> None:
@@ -290,9 +296,10 @@ def test_main_dry_run_returns_zero(tmp_path: Path, monkeypatch) -> None:
         collectors: list = []
 
         def run(self, *, dry_run: bool = False, limit: int | None = None,
-                weekly: bool | None = None) -> PipelineResult:
+                weekly: bool | None = None, weekly_only: bool = False) -> PipelineResult:
             captured["dry_run"] = dry_run
             captured["limit"] = limit
+            captured["weekly_only"] = weekly_only
             return PipelineResult(collected=1, new_after_dedup=1, processed=1)
 
     monkeypatch.setattr("pipeline.build_pipeline", lambda cfg, **kw: _FakePipe())
@@ -308,9 +315,57 @@ def test_main_returns_one_on_ai_abort(tmp_path: Path, monkeypatch) -> None:
         feishu = None
 
         def run(self, *, dry_run: bool = False, limit: int | None = None,
-                weekly: bool | None = None) -> PipelineResult:
+                weekly: bool | None = None, weekly_only: bool = False) -> PipelineResult:
             return PipelineResult(collected=3, new_after_dedup=3, ai_aborted=True)
 
     monkeypatch.setattr("pipeline.build_pipeline", lambda cfg, **kw: _FakePipe())
     rc = main(["--config", str(_write_cfg(tmp_path)), "--dry-run"])
     assert rc == 1
+
+
+def test_weekly_only_skips_daily_digests() -> None:
+    """--weekly-only path: only weekly kinds are requested from DigestBuilder."""
+    built: list[str] = []
+
+    class FakeDigest:
+        aborted = False
+
+        def build(self, items, *, kind, period_label=None, today=None,
+                  max_items=None, sources=None):
+            built.append(kind)
+            from models.digest import DigestPackage
+            return DigestPackage(
+                kind=kind,
+                period_label="2026-W28" if "周" in kind else "2026-07-09",
+                platform_posts={
+                    "小红书": {"title": "t", "body": "body body"},
+                    "知乎": {"title": "t", "body": "body"},
+                    "B站": {"title": "t", "body": "body"},
+                },
+                item_count=1,
+            )
+
+    pipe = Pipeline(
+        collectors=[FakeCollector([
+            _item("u1", source="GitHub", score=80.0),
+            _item("u2", source="GitHubAI", score=85.0),
+        ])],
+        digest_builder=FakeDigest(),  # type: ignore[arg-type]
+        weekly_enabled=True,
+        daily_enabled=True,
+        ai_daily_enabled=True,
+        ai_weekly_enabled=True,
+        out=lambda _: None,
+        output_dir=".",  # unused when we mock export via no write if packages empty path
+    )
+    # Avoid writing to repo: redirect output_dir to a temp via monkeypatch in real test —
+    # use dry_run True and a disposable path.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        pipe.output_dir = td
+        result = pipe.run(dry_run=True, weekly=True, weekly_only=True)
+
+    assert result.digests == 2
+    assert set(built) == {"周贴", "AI周贴"}
+    assert "日贴" not in built
+    assert "AI日贴" not in built

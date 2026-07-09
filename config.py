@@ -62,6 +62,9 @@ class SourcesConfig:
     github: GitHubSourceConfig
     hackernews: HackerNewsSourceConfig
     godot: GodotSourceConfig
+    github_ai: GitHubSourceConfig = field(default_factory=lambda: GitHubSourceConfig(
+        enabled=False, query="", pushed_within_days=14, min_stars=0, per_page=30,
+    ))
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,10 @@ class DigestConfig:
     # When True, still generate per-item platform posts (expensive; usually off).
     rewrite_per_item: bool
     output_dir: str
+    ai_daily_enabled: bool = True
+    ai_weekly_enabled: bool = True
+    max_items_ai_daily: int = 6
+    max_items_ai_weekly: int = 12
 
 
 @dataclass(frozen=True)
@@ -114,6 +121,10 @@ class Config:
         weekly_lookback_days=7,
         rewrite_per_item=False,
         output_dir="output",
+        ai_daily_enabled=True,
+        ai_weekly_enabled=True,
+        max_items_ai_daily=6,
+        max_items_ai_weekly=12,
     ))
     max_items_per_run: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
@@ -154,20 +165,25 @@ def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _github_source(raw: dict[str, Any] | None) -> GitHubSourceConfig:
+    gh = raw or {}
+    return GitHubSourceConfig(
+        enabled=_as_bool(gh.get("enabled", False)),
+        query=str(gh.get("query", "")),
+        pushed_within_days=int(gh.get("pushed_within_days", 14)),
+        min_stars=int(gh.get("min_stars", 0)),
+        per_page=int(gh.get("per_page", 30)),
+    )
+
+
 def _build_config(data: dict[str, Any]) -> Config:
     src = data.get("sources", {})
-    gh = src.get("github", {})
     hn = src.get("hackernews", {})
     gd = src.get("godot", {})
 
     sources = SourcesConfig(
-        github=GitHubSourceConfig(
-            enabled=_as_bool(gh.get("enabled", False)),
-            query=str(gh.get("query", "")),
-            pushed_within_days=int(gh.get("pushed_within_days", 14)),
-            min_stars=int(gh.get("min_stars", 0)),
-            per_page=int(gh.get("per_page", 30)),
-        ),
+        github=_github_source(src.get("github")),
+        github_ai=_github_source(src.get("github_ai")),
         hackernews=HackerNewsSourceConfig(
             enabled=_as_bool(hn.get("enabled", False)),
             lists=tuple(hn.get("lists", []) or []),
@@ -209,8 +225,12 @@ def _build_config(data: dict[str, Any]) -> Config:
     digest = DigestConfig(
         daily_enabled=_as_bool(dg_raw.get("daily_enabled", True)),
         weekly_enabled=_as_bool(dg_raw.get("weekly_enabled", False)),
+        ai_daily_enabled=_as_bool(dg_raw.get("ai_daily_enabled", True)),
+        ai_weekly_enabled=_as_bool(dg_raw.get("ai_weekly_enabled", True)),
         max_items_daily=int(dg_raw.get("max_items_daily", 8)),
         max_items_weekly=int(dg_raw.get("max_items_weekly", 15)),
+        max_items_ai_daily=int(dg_raw.get("max_items_ai_daily", 6)),
+        max_items_ai_weekly=int(dg_raw.get("max_items_ai_weekly", 12)),
         weekly_lookback_days=int(dg_raw.get("weekly_lookback_days", 7)),
         rewrite_per_item=_as_bool(dg_raw.get("rewrite_per_item", False)),
         output_dir=str(dg_raw.get("output_dir", "output")),

@@ -101,12 +101,15 @@ def format_dimensions(dimensions: dict[str, float]) -> str:
     return " ".join(parts)
 
 
+_DIGEST_CONTENT_TYPES = frozenset({"日贴", "周贴", "AI日贴", "AI周贴"})
+
+
 def item_to_fields(item: IntelligenceItem) -> dict[str, Any]:
     """Map an ``IntelligenceItem`` to a Feishu ``fields`` payload."""
     content_type = "单条情报"
-    if item.source in {"日贴", "周贴"}:
+    if item.source in _DIGEST_CONTENT_TYPES:
         content_type = item.source
-    elif item.category in {"日贴", "周贴"}:
+    elif item.category in _DIGEST_CONTENT_TYPES:
         content_type = item.category
 
     fields: dict[str, Any] = {
@@ -305,10 +308,10 @@ class FeishuClient(FeishuAuth):
         for rec in self._iter_records():
             fields = rec.get("fields") or {}
             source = str(fields.get("来源") or "").strip()
-            if source in {"日贴", "周贴"}:
+            if source in _DIGEST_CONTENT_TYPES:
                 continue
             content_type = str(fields.get("内容类型") or "").strip()
-            if content_type in {"日贴", "周贴"}:
+            if content_type in _DIGEST_CONTENT_TYPES:
                 continue
             fetched = _parse_feishu_ms(fields.get(FETCHED_AT_FIELD))
             if fetched is not None and fetched < cutoff:

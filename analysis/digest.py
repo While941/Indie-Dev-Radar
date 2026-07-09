@@ -2,15 +2,17 @@
 
 Human publishes manually: digests are copy-ready (title + body per platform).
 No auto-posting adapters.
+
+Supports general 日贴/周贴 and independent AI日贴/AI周贴 (GitHubAI track).
 """
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import date
 from typing import Any
 
-from models.digest import DigestPackage, period_label_daily, period_label_weekly
+from models.digest import DIGEST_KINDS, DIGEST_SOURCES, DigestPackage, period_label_daily, period_label_weekly
 from models.item import PUBLISH_PLATFORMS, IntelligenceItem
 
 from .ai_client import AIAuthError, ChatClient
@@ -19,25 +21,54 @@ from .rewriter import parse_rewrite_response
 
 log = logging.getLogger(__name__)
 
+# Kinds that use ISO-week period labels.
+_WEEKLY_KINDS = frozenset({"周贴", "AI周贴"})
+
 
 def select_digest_candidates(
     items: Sequence[IntelligenceItem],
     *,
     score_threshold: float,
     max_items: int,
+    min_fallback: int = 3,
+    sources: Collection[str] | None = None,
 ) -> list[IntelligenceItem]:
-    """Pick scored, non-deleted items above threshold, highest score first."""
-    pool = [
+    """Pick scored, non-deleted items for a digest.
+
+    Prefer items at/above ``score_threshold``. If none qualify (common when the
+    batch is off-topic), fall back to the top-scoring scored items so a 日贴
+    is still produced instead of silent empty ``output/``.
+
+    When ``sources`` is set, only items whose ``source`` is in that set are
+    considered (used to keep GitHubAI out of general digests and vice versa).
+    """
+    base = [
         i for i in items
         if i.is_scored
         and i.score is not None
-        and i.score >= score_threshold
         and i.recommended_action != "删除"
-        and i.source not in {"日贴", "周贴"}
+        and i.source not in DIGEST_SOURCES
+        and (sources is None or i.source in sources)
     ]
-    pool.sort(key=lambda x: x.score or 0.0, reverse=True)
+    base.sort(key=lambda x: x.score or 0.0, reverse=True)
+    above = [i for i in base if (i.score or 0) >= score_threshold]
+    if above:
+        pool = above
+    else:
+        # Fallback: best available so export still happens
+        pool = base
+        if pool:
+            log.info(
+                "No items >= %.0f; falling back to top %d by score (best=%.0f)",
+                score_threshold,
+                min(max_items if max_items > 0 else len(pool), len(pool)),
+                pool[0].score or 0,
+            )
     if max_items > 0:
         pool = pool[:max_items]
+    # Avoid single-item noise when using pure fallback of very low scores
+    if not above and len(pool) < min_fallback and len(base) >= min_fallback:
+        pool = base[:max(max_items, min_fallback) if max_items > 0 else min_fallback]
     return pool
 
 
@@ -71,7 +102,7 @@ def parse_digest_response(
 
 
 class DigestBuilder:
-    """Strong-model digest generation for 日贴 / 周贴."""
+    """Strong-model digest generation for 日贴 / 周贴 / AI日贴 / AI周贴."""
 
     def __init__(
         self,
@@ -99,22 +130,24 @@ class DigestBuilder:
         period_label: str | None = None,
         today: date | None = None,
         max_items: int | None = None,
+        sources: Collection[str] | None = None,
     ) -> DigestPackage | None:
         """Generate one digest. Returns None if no candidates or empty AI result."""
         self.aborted = False
-        if kind not in {"日贴", "周贴"}:
+        if kind not in DIGEST_KINDS:
             raise ValueError(f"unknown digest kind: {kind}")
 
         if period_label is None:
             period_label = (
-                period_label_daily(today) if kind == "日贴"
-                else period_label_weekly(today)
+                period_label_weekly(today) if kind in _WEEKLY_KINDS
+                else period_label_daily(today)
             )
 
         candidates = select_digest_candidates(
             items,
             score_threshold=self._score_threshold,
             max_items=self._max_items if max_items is None else max_items,
+            sources=sources,
         )
         if not candidates:
             log.info("%s: no candidates above threshold %.0f", kind, self._score_threshold)

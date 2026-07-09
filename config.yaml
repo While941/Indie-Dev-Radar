@@ -10,6 +10,19 @@ sources:
     min_stars: 30
     per_page: 30
 
+  # Independent AI track (source label GitHubAI) → AI日贴 / AI周贴 only.
+  # Focus: AI tools/projects indie game developers can actually use.
+  github_ai:
+    enabled: true
+    query: >-
+      (llm OR "language model" OR "stable diffusion" OR comfyui
+      OR "text-to-image" OR "procedural generation" OR "npc dialogue"
+      OR "ai agent" OR "game ai")
+      (game OR gamedev OR godot OR unity OR unreal OR "indie game")
+    pushed_within_days: 14
+    min_stars: 20
+    per_page: 30
+
   hackernews:
     enabled: true
     lists: ["topstories", "showstories"]   # which HN story lists to pull
@@ -40,11 +53,16 @@ scoring:
 max_items_per_run: 40
 
 # Daily / weekly digests: AI-written, human copy-pastes to publish (no auto-post).
+# AI日贴/AI周贴 are separate packages fed only by sources.github_ai (GitHubAI).
 digest:
   daily_enabled: true
   weekly_enabled: false          # enable via --weekly or set true on weekly cron
+  ai_daily_enabled: true
+  ai_weekly_enabled: true        # generated when --weekly (and ai_weekly_enabled)
   max_items_daily: 8
   max_items_weekly: 15
+  max_items_ai_daily: 6
+  max_items_ai_weekly: 12
   weekly_lookback_days: 7
   rewrite_per_item: false        # per-item long posts are expensive; digests are primary
   output_dir: "output"           # HTML/MD with one-click copy buttons

@@ -33,6 +33,36 @@ def test_select_candidates_threshold_and_order() -> None:
     assert [i.source_url for i in got] == ["u2", "u3"]
 
 
+def test_select_candidates_fallback_when_none_above_threshold() -> None:
+    items = [
+        _item("u1", 40),
+        _item("u2", 55),
+        _item("u3", 30),
+    ]
+    got = select_digest_candidates(
+        items, score_threshold=70, max_items=2, min_fallback=1,
+    )
+    assert [i.source_url for i in got] == ["u2", "u1"]  # top scores, not empty
+
+
+def test_select_candidates_filters_by_sources() -> None:
+    items = [
+        _item("g1", 90, source="GitHub"),
+        _item("a1", 95, source="GitHubAI"),
+        _item("h1", 85, source="HackerNews"),
+    ]
+    general = select_digest_candidates(
+        items, score_threshold=70, max_items=10,
+        sources={"GitHub", "HackerNews", "Godot"},
+    )
+    ai = select_digest_candidates(
+        items, score_threshold=70, max_items=10,
+        sources={"GitHubAI"},
+    )
+    assert [i.source_url for i in general] == ["g1", "h1"]
+    assert [i.source_url for i in ai] == ["a1"]
+
+
 def test_parse_digest_response() -> None:
     raw = {
         "recommended_title": "本周日推",
@@ -82,3 +112,21 @@ def test_export_html_has_copy_buttons(tmp_path: Path) -> None:
     assert (tmp_path / "latest-daily.html").exists()
     md = paths["markdown"].read_text(encoding="utf-8")
     assert "## 小红书" in md
+
+
+def test_export_ai_daily_latest_shortcut(tmp_path: Path) -> None:
+    pkg = DigestPackage(
+        kind="AI日贴",
+        period_label="2026-07-09",
+        platform_posts={
+            "小红书": {"title": "AI题", "body": "AI正文"},
+            "知乎": {"title": "知", "body": "正文"},
+            "B站": {"title": "B", "body": "动态"},
+        },
+        item_count=2,
+        recommended_title="今日 AI 工具",
+    )
+    paths = export_package(pkg, tmp_path)
+    assert paths["html"].name == "AI日贴-2026-07-09.html"
+    assert (tmp_path / "latest-ai-daily.html").exists()
+    assert "AI正文" in (tmp_path / "latest-ai-daily.html").read_text(encoding="utf-8")

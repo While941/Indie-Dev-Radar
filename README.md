@@ -41,13 +41,24 @@ py pipeline.py --dry-run --limit 15
 - `output/latest-daily.html` — 最新日贴快捷入口
 - 同名 `.md` 便于归档
 
-### 额外生成周贴
+### 额外生成周贴 / AI 周贴
 
 ```bash
 py pipeline.py --weekly --limit 20
 ```
 
-周贴会尽量从飞书近 N 天已评分条目中汇总（需飞书凭证）。
+周贴与 AI周贴会尽量从飞书近 N 天已评分条目中汇总（需飞书凭证），再按来源拆池。
+
+周五下午只跑周类（跳过日贴/AI日贴，避免与早上日跑重复）：
+
+```bash
+py pipeline.py --weekly --weekly-only
+```
+
+AI 日贴/周贴只收录 `GitHubAI` 源（`config.yaml` → `sources.github_ai`），导出：
+
+- `output/AI日贴-YYYY-MM-DD.html` / `latest-ai-daily.html`
+- `output/AI周贴-YYYY-Www.html` / `latest-ai-weekly.html`
 
 ### 真实写入飞书
 
@@ -99,24 +110,43 @@ py setup_feishu_table.py
 
 ## GitHub Actions
 
-`.github/workflows/daily-collect.yml`：每天 UTC 01:00（北京 09:00）。  
+`.github/workflows/daily-collect.yml`（北京时间，UTC+8）：
+
+| 调度 | UTC cron | 行为 |
+|------|----------|------|
+| 每天 10:00 | `0 2 * * *` | 日贴 + AI日贴 |
+| 周五 16:00 | `0 8 * * 5` | 仅 周贴 + AI周贴（`--weekly --weekly-only`） |
+
+免费仓库的 schedule 可能延迟数分钟，属平台限制。也可 `workflow_dispatch` 手动选 weekly / dry_run。
+
 Secrets：`GH_TOKEN`、`AI_API_KEY`、`AI_BASE_URL=https://api.deepseek.com`、飞书四件套。
 
-Actions 产物默认在 runner 上；本地或自托管更适合保存 `output/` HTML。若需要可后续加 artifact 上传。
+产物上传为 artifact `digests`（`output/`）。
 
 ## 配置要点（`config.yaml`）
 
 ```yaml
+sources:
+  github_ai:
+    enabled: true         # 独立 AI 赛道 → AI日贴/AI周贴
 digest:
   daily_enabled: true
   weekly_enabled: false   # 或用 --weekly
+  ai_daily_enabled: true
+  ai_weekly_enabled: true
   max_items_daily: 8
   max_items_weekly: 15
+  max_items_ai_daily: 6
+  max_items_ai_weekly: 12
   rewrite_per_item: false
   output_dir: "output"
 scoring:
   score_threshold: 70     # 进入日贴/周贴候选的最低分
 ```
+
+### 已有飞书表升级
+
+若表是旧版创建，请在「来源」单选增加：`GitHubAI`、`AI日贴`、`AI周贴`；在「内容类型」增加：`AI日贴`、`AI周贴`。新建表可直接 `py setup_feishu_table.py`。
 
 ## 合规
 

@@ -170,4 +170,10 @@ def export_package(package: DigestPackage, output_dir: Path) -> dict[str, Path]:
     if package.kind == "周贴":
         export_digest_html(package, output_dir / "latest-weekly.html")
         export_digest_markdown(package, output_dir / "latest-weekly.md")
+    if package.kind == "AI日贴":
+        export_digest_html(package, output_dir / "latest-ai-daily.html")
+        export_digest_markdown(package, output_dir / "latest-ai-daily.md")
+    if package.kind == "AI周贴":
+        export_digest_html(package, output_dir / "latest-ai-weekly.html")
+        export_digest_markdown(package, output_dir / "latest-ai-weekly.md")
     return {"markdown": md, "html": ht}

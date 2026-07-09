@@ -21,6 +21,12 @@ sources:
     pushed_within_days: 7
     min_stars: 25
     per_page: 20
+  github_ai:
+    enabled: true
+    query: "llm game"
+    pushed_within_days: 14
+    min_stars: 20
+    per_page: 25
   hackernews:
     enabled: true
     lists: ["topstories"]
@@ -53,7 +59,10 @@ max_items_per_run: 40
 digest:
   daily_enabled: true
   weekly_enabled: false
+  ai_daily_enabled: true
+  ai_weekly_enabled: false
   max_items_daily: 5
+  max_items_ai_daily: 4
   rewrite_per_item: false
   output_dir: "out-test"
         """,
@@ -69,6 +78,10 @@ def test_loads_typed_config(cfg_path: Path) -> None:
     assert cfg.sources.github.query == "godot OR gamedev"
     assert cfg.sources.github.min_stars == 25
 
+    assert cfg.sources.github_ai.enabled is True
+    assert cfg.sources.github_ai.query == "llm game"
+    assert cfg.sources.github_ai.min_stars == 20
+
     assert cfg.sources.hackernews.lists == ("topstories",)
     assert cfg.sources.hackernews.top_n == 15
 
@@ -78,7 +91,10 @@ def test_loads_typed_config(cfg_path: Path) -> None:
     assert cfg.feishu.dedup_lookback_days == 7
     assert cfg.max_items_per_run == 40
     assert cfg.digest.daily_enabled is True
+    assert cfg.digest.ai_daily_enabled is True
+    assert cfg.digest.ai_weekly_enabled is False
     assert cfg.digest.max_items_daily == 5
+    assert cfg.digest.max_items_ai_daily == 4
     assert cfg.digest.rewrite_per_item is False
     assert cfg.digest.output_dir == "out-test"
 

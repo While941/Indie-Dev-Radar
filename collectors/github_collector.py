@@ -32,12 +32,14 @@ class GitHubCollector(Collector):
         *,
         base_url: str = BASE_URL,
         now: datetime | None = None,
+        source_label: str = "GitHub",
     ) -> None:
         self._cfg = cfg
         self._client = client
         self._token = token
         self._base_url = base_url.rstrip("/")
         self._now = now or datetime.now(timezone.utc)
+        self._source_label = source_label or "GitHub"
 
     def _headers(self) -> dict[str, str]:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
@@ -66,14 +68,19 @@ class GitHubCollector(Collector):
         for repo in repos:
             if not isinstance(repo, dict):
                 continue
-            item = self._to_item(repo, self._now)
+            item = self._to_item(repo, self._now, source=self._source_label)
             if item is not None:
                 items.append(item)
-        log.info("GitHub: collected %d items", len(items))
+        log.info("%s: collected %d items", self._source_label, len(items))
         return items
 
     @staticmethod
-    def _to_item(repo: dict, fetched_at: datetime) -> IntelligenceItem | None:
+    def _to_item(
+        repo: dict,
+        fetched_at: datetime,
+        *,
+        source: str = "GitHub",
+    ) -> IntelligenceItem | None:
         html_url = repo.get("html_url")
         if not html_url:
             return None
@@ -83,7 +90,7 @@ class GitHubCollector(Collector):
         topics_tuple = tuple(topics) if isinstance(topics, list) else ()
 
         return IntelligenceItem(
-            source="GitHub",
+            source=source,
             source_url=html_url,
             title=repo.get("full_name") or repo.get("name") or html_url,
             summary_raw=(repo.get("description") or "").strip(),

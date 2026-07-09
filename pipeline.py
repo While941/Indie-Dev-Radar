@@ -1,4 +1,4 @@
-"""Pipeline: collect -> dedup -> score -> digests (日贴/周贴) -> export + Feishu.
+"""Pipeline: collect -> dedup -> score -> digests (日贴/周贴/AI*) -> export + Feishu.
 
 Human only reviews and copy-publishes. No auto-posting to social platforms.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,7 +21,11 @@ from analysis.rewriter import Rewriter
 from analysis.scorer import Scorer
 from collectors import Collector, GitHubCollector, GodotCollector, HackerNewsCollector
 from config import Config, load_config
-from models.digest import DigestPackage
+from models.digest import (
+    AI_INTEL_SOURCE,
+    GENERAL_INTEL_SOURCES,
+    DigestPackage,
+)
 from models.item import IntelligenceItem
 from storage.dedup import filter_new
 from storage.export_copy import export_package
@@ -54,6 +58,15 @@ def _is_pushable(item: IntelligenceItem) -> bool:
     return True
 
 
+def _split_pools(
+    items: Sequence[IntelligenceItem],
+) -> tuple[list[IntelligenceItem], list[IntelligenceItem]]:
+    """Partition scored intel into general vs AI tracks (by source label)."""
+    ai = [it for it in items if it.source == AI_INTEL_SOURCE]
+    general = [it for it in items if it.source != AI_INTEL_SOURCE]
+    return general, ai
+
+
 @dataclass
 class Pipeline:
     """Orchestrates the flow. Components are duck-typed for easy testing."""
@@ -65,8 +78,12 @@ class Pipeline:
     feishu: FeishuClient | None = None
     daily_enabled: bool = True
     weekly_enabled: bool = False
+    ai_daily_enabled: bool = True
+    ai_weekly_enabled: bool = True
     weekly_lookback_days: int = 7
     max_items_weekly: int = 15
+    max_items_ai_daily: int = 6
+    max_items_ai_weekly: int = 12
     output_dir: str = "output"
     out: Callable[[str], None] = print
 
@@ -76,6 +93,7 @@ class Pipeline:
         dry_run: bool = False,
         limit: int | None = None,
         weekly: bool | None = None,
+        weekly_only: bool = False,
     ) -> PipelineResult:
         collected = self._collect()
 
@@ -114,45 +132,62 @@ class Pipeline:
         packages: list[DigestPackage] = []
         export_paths: list[str] = []
         do_weekly = self.weekly_enabled if weekly is None else weekly
+        do_daily = self.daily_enabled and not weekly_only
+        do_ai_daily = self.ai_daily_enabled and not weekly_only
+        do_ai_weekly = self.ai_weekly_enabled and do_weekly
 
         if self.digest_builder is not None and not ai_aborted:
-            if self.daily_enabled:
-                try:
-                    daily = self.digest_builder.build(items, kind="日贴")
-                    if daily is not None:
-                        packages.append(daily)
-                except Exception as exc:  # noqa: BLE001 — AIAuthError sets aborted
-                    if getattr(self.digest_builder, "aborted", False):
-                        ai_aborted = True
-                        log.error("Daily digest aborted: %s", exc)
-                    else:
-                        log.warning("Daily digest failed: %s", exc)
+            general_items, ai_items = _split_pools(items)
 
-            if do_weekly and not ai_aborted:
-                week_pool = list(items)
-                if self.feishu is not None:
-                    try:
-                        prior = self.feishu.list_scored_candidates(
-                            days=self.weekly_lookback_days,
-                            min_score=0.0,
-                        )
-                        week_pool = _merge_by_url(prior, items)
-                    except Exception as exc:  # noqa: BLE001
-                        log.warning("Weekly candidate load failed: %s", exc)
-                try:
-                    weekly_pkg = self.digest_builder.build(
-                        week_pool,
-                        kind="周贴",
-                        max_items=self.max_items_weekly,
-                    )
-                    if weekly_pkg is not None:
-                        packages.append(weekly_pkg)
-                except Exception as exc:  # noqa: BLE001
-                    if getattr(self.digest_builder, "aborted", False):
-                        ai_aborted = True
-                        log.error("Weekly digest aborted: %s", exc)
-                    else:
-                        log.warning("Weekly digest failed: %s", exc)
+            if do_daily:
+                pkg = self._try_digest(
+                    general_items, kind="日贴", sources=GENERAL_INTEL_SOURCES,
+                )
+                if pkg is not None:
+                    packages.append(pkg)
+                if getattr(self.digest_builder, "aborted", False):
+                    ai_aborted = True
+
+            if do_ai_daily and not ai_aborted:
+                pkg = self._try_digest(
+                    ai_items,
+                    kind="AI日贴",
+                    sources={AI_INTEL_SOURCE},
+                    max_items=self.max_items_ai_daily,
+                )
+                if pkg is not None:
+                    packages.append(pkg)
+                if getattr(self.digest_builder, "aborted", False):
+                    ai_aborted = True
+
+            week_general: list[IntelligenceItem] | None = None
+            week_ai: list[IntelligenceItem] | None = None
+            if (do_weekly or do_ai_weekly) and not ai_aborted:
+                week_general, week_ai = self._weekly_pools(general_items, ai_items)
+
+            if do_weekly and not ai_aborted and week_general is not None:
+                pkg = self._try_digest(
+                    week_general,
+                    kind="周贴",
+                    sources=GENERAL_INTEL_SOURCES,
+                    max_items=self.max_items_weekly,
+                )
+                if pkg is not None:
+                    packages.append(pkg)
+                if getattr(self.digest_builder, "aborted", False):
+                    ai_aborted = True
+
+            if do_ai_weekly and not ai_aborted and week_ai is not None:
+                pkg = self._try_digest(
+                    week_ai,
+                    kind="AI周贴",
+                    sources={AI_INTEL_SOURCE},
+                    max_items=self.max_items_ai_weekly,
+                )
+                if pkg is not None:
+                    packages.append(pkg)
+                if getattr(self.digest_builder, "aborted", False):
+                    ai_aborted = True
 
             out_dir = Path(self.output_dir)
             for pkg in packages:
@@ -168,8 +203,6 @@ class Pipeline:
             self._print_dry_run(items, packages, export_paths)
         else:
             to_push = [i for i in all_for_push if _is_pushable(i)]
-            # Prefer digest packages even if same URL already seen (filter_new already
-            # handled intel URLs; digests use digest:// keys).
             skipped = len(all_for_push) - len(to_push)
             if skipped:
                 log.info("Skipping %d unscored/deleted items (not pushing)", skipped)
@@ -192,6 +225,47 @@ class Pipeline:
             digest_packages=packages,
             export_paths=export_paths,
         )
+
+    def _try_digest(
+        self,
+        items: Sequence[IntelligenceItem],
+        *,
+        kind: str,
+        sources: Collection[str] | None = None,
+        max_items: int | None = None,
+    ) -> DigestPackage | None:
+        assert self.digest_builder is not None
+        try:
+            return self.digest_builder.build(
+                items,
+                kind=kind,
+                max_items=max_items,
+                sources=sources,
+            )
+        except Exception as exc:  # noqa: BLE001 — AIAuthError sets aborted
+            if getattr(self.digest_builder, "aborted", False):
+                log.error("%s digest aborted: %s", kind, exc)
+            else:
+                log.warning("%s digest failed: %s", kind, exc)
+            return None
+
+    def _weekly_pools(
+        self,
+        general_items: list[IntelligenceItem],
+        ai_items: list[IntelligenceItem],
+    ) -> tuple[list[IntelligenceItem], list[IntelligenceItem]]:
+        """Merge Feishu lookback (when available) then split general vs AI."""
+        week_pool = list(general_items) + list(ai_items)
+        if self.feishu is not None:
+            try:
+                prior = self.feishu.list_scored_candidates(
+                    days=self.weekly_lookback_days,
+                    min_score=0.0,
+                )
+                week_pool = _merge_by_url(prior, week_pool)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Weekly candidate load failed: %s", exc)
+        return _split_pools(week_pool)
 
     def _collect(self) -> list[IntelligenceItem]:
         all_items: list[IntelligenceItem] = []
@@ -219,7 +293,7 @@ class Pipeline:
             self.out(f"     {it.source_url}\n")
 
         if packages:
-            self.out("--- 日贴 / 周贴（可一键复制发布）---\n")
+            self.out("--- 日贴 / 周贴 / AI 贴（可一键复制发布）---\n")
             for pkg in packages:
                 self.out(f"【{pkg.kind}】{pkg.period_label} · {pkg.item_count} 条")
                 self.out(f"  总标题: {pkg.recommended_title or pkg.package_title}")
@@ -268,7 +342,14 @@ def build_pipeline(
     if cfg.sources.hackernews.enabled:
         collectors.append(HackerNewsCollector(cfg.sources.hackernews, client))
     if cfg.sources.github.enabled:
-        collectors.append(GitHubCollector(cfg.sources.github, client, token=cfg.github_token))
+        collectors.append(GitHubCollector(
+            cfg.sources.github, client, token=cfg.github_token,
+        ))
+    if cfg.sources.github_ai.enabled:
+        collectors.append(GitHubCollector(
+            cfg.sources.github_ai, client, token=cfg.github_token,
+            source_label=AI_INTEL_SOURCE,
+        ))
 
     scorer: Scorer | None = None
     rewriter: Rewriter | None = None
@@ -314,8 +395,12 @@ def build_pipeline(
         feishu=feishu,
         daily_enabled=cfg.digest.daily_enabled,
         weekly_enabled=cfg.digest.weekly_enabled,
+        ai_daily_enabled=cfg.digest.ai_daily_enabled,
+        ai_weekly_enabled=cfg.digest.ai_weekly_enabled,
         weekly_lookback_days=cfg.digest.weekly_lookback_days,
         max_items_weekly=cfg.digest.max_items_weekly,
+        max_items_ai_daily=cfg.digest.max_items_ai_daily,
+        max_items_ai_weekly=cfg.digest.max_items_ai_weekly,
         output_dir=cfg.digest.output_dir,
     )
 
@@ -328,7 +413,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=None,
                         help="cap the number of items processed (overrides config max_items_per_run)")
     parser.add_argument("--weekly", action="store_true",
-                        help="also generate 周贴 (uses Feishu history when available)")
+                        help="also generate 周贴 / AI周贴 (uses Feishu history when available)")
+    parser.add_argument("--weekly-only", action="store_true",
+                        help="with --weekly: skip 日贴/AI日贴 (Friday afternoon cron)")
     parser.add_argument("--clear", action="store_true",
                         help="delete all Feishu records before running (reset the table)")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -353,6 +440,9 @@ def main(argv: list[str] | None = None) -> int:
         pipeline = build_pipeline(cfg, client=client)
         if args.weekly:
             pipeline.weekly_enabled = True
+        if args.weekly_only and not args.weekly:
+            log.warning("--weekly-only without --weekly: enabling weekly digests")
+            pipeline.weekly_enabled = True
         if args.clear:
             if pipeline.feishu is None:
                 log.warning("--clear ignored: Feishu not configured")
@@ -361,7 +451,12 @@ def main(argv: list[str] | None = None) -> int:
                 pipeline.feishu.clear_all()
         dry_run = args.dry_run or pipeline.feishu is None
         limit = args.limit if args.limit is not None else cfg.max_items_per_run
-        result = pipeline.run(dry_run=dry_run, limit=limit, weekly=args.weekly or None)
+        result = pipeline.run(
+            dry_run=dry_run,
+            limit=limit,
+            weekly=True if (args.weekly or args.weekly_only) else None,
+            weekly_only=bool(args.weekly_only),
+        )
         log.info(
             "Done: new=%d processed=%d scored=%d digests=%d pushed=%d aborted=%s",
             result.new_after_dedup, result.processed, result.scored,

@@ -201,3 +201,32 @@ def test_github_omits_auth_when_no_token() -> None:
         GitHubCollector(cfg, client, token="", now=NOW).collect()
 
     assert "authorization" not in captured["headers"]
+
+
+@respx.mock
+def test_github_source_label_githubai() -> None:
+    respx.get("https://api.github.com/search/repositories").respond(200, json={
+        "items": [{
+            "full_name": "dev/llm-npc",
+            "html_url": "https://github.com/dev/llm-npc",
+            "description": "NPC dialogue",
+            "owner": {"login": "dev"},
+            "stargazers_count": 50,
+            "forks_count": 2,
+            "language": "Python",
+            "topics": ["ai", "game"],
+            "pushed_at": "2026-06-30T10:00:00Z",
+        }],
+    })
+    cfg = GitHubSourceConfig(
+        enabled=True, query="llm game", pushed_within_days=14,
+        min_stars=20, per_page=30,
+    )
+    with httpx.Client() as client:
+        items = GitHubCollector(
+            cfg, client, token="", now=NOW, source_label="GitHubAI",
+        ).collect()
+
+    assert len(items) == 1
+    assert items[0].source == "GitHubAI"
+    assert items[0].title == "dev/llm-npc"

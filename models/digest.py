@@ -6,14 +6,20 @@ from datetime import date, datetime, timezone
 
 from models.item import PUBLISH_PLATFORMS, IntelligenceItem
 
-DIGEST_SOURCES = frozenset({"日贴", "周贴"})
+# Package rows written to Feishu / excluded from weekly candidate pools.
+DIGEST_SOURCES = frozenset({"日贴", "周贴", "AI日贴", "AI周贴"})
+DIGEST_KINDS = DIGEST_SOURCES  # alias: valid DigestPackage.kind values
+
+# Source label used by the dedicated GitHub AI collector.
+AI_INTEL_SOURCE = "GitHubAI"
+GENERAL_INTEL_SOURCES = frozenset({"GitHub", "HackerNews", "Godot"})
 
 
 @dataclass(frozen=True)
 class DigestPackage:
     """One publish-ready package covering multiple intelligence items."""
 
-    kind: str  # 日贴 | 周贴
+    kind: str  # 日贴 | 周贴 | AI日贴 | AI周贴
     period_label: str  # e.g. 2026-07-09 or 2026-W28
     platform_posts: dict[str, dict[str, str]]  # {平台: {title, body}}
     source_urls: tuple[str, ...] = ()
@@ -29,8 +35,11 @@ class DigestPackage:
 
     @property
     def package_title(self) -> str:
-        base = self.recommended_title or f"独立游戏情报{self.kind} · {self.period_label}"
-        return base
+        if self.recommended_title:
+            return self.recommended_title
+        if self.kind.startswith("AI"):
+            return f"独立游戏 AI 情报{self.kind} · {self.period_label}"
+        return f"独立游戏情报{self.kind} · {self.period_label}"
 
     def to_item(self) -> IntelligenceItem:
         """Map into IntelligenceItem so Feishu writer / export stay unified."""
