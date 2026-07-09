@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from models.signals import DiscoverySignals
+
 
 # Platforms we generate publish-ready title+body for (review → later auto-publish).
 PUBLISH_PLATFORMS = ("小红书", "知乎", "B站")
@@ -28,6 +30,8 @@ class IntelligenceItem:
     published_at: datetime | None
     fetched_at: datetime
     score_raw: dict[str, Any] = field(default_factory=dict)
+    # Multi-path / freshness signals (set by collectors; optional for tests/fakes).
+    signals: DiscoverySignals | None = None
 
     # --- AI-filled (None until scored) ---
     category: str | None = None

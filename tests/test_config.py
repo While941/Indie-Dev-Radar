@@ -77,6 +77,10 @@ def test_loads_typed_config(cfg_path: Path) -> None:
     assert cfg.sources.github.enabled is True
     assert cfg.sources.github.query == "godot OR gamedev"
     assert cfg.sources.github.min_stars == 25
+    assert cfg.sources.github.pushed_within_days == 7
+    # defaults when not specified in yaml
+    assert cfg.sources.github.max_age_days == 3
+    assert cfg.sources.github.path_sorts == ("stars", "updated")
 
     assert cfg.sources.github_ai.enabled is True
     assert cfg.sources.github_ai.query == "llm game"
@@ -84,9 +88,13 @@ def test_loads_typed_config(cfg_path: Path) -> None:
 
     assert cfg.sources.hackernews.lists == ("topstories",)
     assert cfg.sources.hackernews.top_n == 15
+    assert cfg.sources.hackernews.require_topic_match is True
 
     assert cfg.sources.godot.enabled is False
+    # legacy single ``sort`` folds into sorts
+    assert cfg.sources.godot.sorts == ("new",)
     assert cfg.scoring.score_threshold == pytest.approx(65.0)
+    assert cfg.scoring.weights.get("path_corroboration") == pytest.approx(0.10)
     assert cfg.ai.cheap_model == "cheap"
     assert cfg.feishu.dedup_lookback_days == 7
     assert cfg.max_items_per_run == 40

@@ -40,6 +40,14 @@ class GitHubSourceConfig:
     pushed_within_days: int
     min_stars: int
     per_page: int
+    # Hard drop when published activity older than this (0 = disabled).
+    max_age_days: int = 3
+    # Soft calendar horizon for freshness unit (always used in DiscoverySignals).
+    freshness_horizon_days: int = 3
+    # Multi-path Search sorts, e.g. ("stars", "updated").
+    path_sorts: tuple[str, ...] = ("stars", "updated")
+    # If >0, also query created:> window as a separate discovery path.
+    created_within_days: int = 7
 
 
 @dataclass(frozen=True)
@@ -47,14 +55,22 @@ class HackerNewsSourceConfig:
     enabled: bool
     lists: tuple[str, ...]
     top_n: int
+    max_age_days: int = 2
+    freshness_horizon_days: int = 2
+    # When True, keep only stories matching topic_keywords (game-dev relevance).
+    require_topic_match: bool = True
+    topic_keywords: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class GodotSourceConfig:
     enabled: bool
     godot_version: str
-    sort: str
     max_results: int
+    # Multi-path Asset Library sorts (canonical). Legacy YAML ``sort`` maps here.
+    sorts: tuple[str, ...] = ("updated", "new", "rating")
+    max_age_days: int = 3
+    freshness_horizon_days: int = 3
 
 
 @dataclass(frozen=True)
@@ -63,7 +79,9 @@ class SourcesConfig:
     hackernews: HackerNewsSourceConfig
     godot: GodotSourceConfig
     github_ai: GitHubSourceConfig = field(default_factory=lambda: GitHubSourceConfig(
-        enabled=False, query="", pushed_within_days=14, min_stars=0, per_page=30,
+        enabled=False, query="", pushed_within_days=3, min_stars=0, per_page=30,
+        max_age_days=3, freshness_horizon_days=3,
+        path_sorts=("stars", "updated"), created_within_days=7,
     ))
 
 
@@ -165,21 +183,53 @@ def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _str_tuple(value: Any, *, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+        return tuple(parts) if parts else default
+    if isinstance(value, (list, tuple)):
+        return tuple(str(x).strip() for x in value if str(x).strip())
+    return default
+
+
 def _github_source(raw: dict[str, Any] | None) -> GitHubSourceConfig:
     gh = raw or {}
+    path_sorts = _str_tuple(gh.get("path_sorts"), default=("stars", "updated"))
+    max_age = int(gh.get("max_age_days", 3))
+    horizon = int(gh.get("freshness_horizon_days", max_age if max_age > 0 else 7))
     return GitHubSourceConfig(
         enabled=_as_bool(gh.get("enabled", False)),
         query=str(gh.get("query", "")),
-        pushed_within_days=int(gh.get("pushed_within_days", 14)),
+        pushed_within_days=int(gh.get("pushed_within_days", 3)),
         min_stars=int(gh.get("min_stars", 0)),
         per_page=int(gh.get("per_page", 30)),
+        max_age_days=max_age,
+        freshness_horizon_days=horizon if horizon > 0 else 7,
+        path_sorts=path_sorts,
+        created_within_days=int(gh.get("created_within_days", 7)),
     )
+
+
+def _godot_sorts(gd: dict[str, Any]) -> tuple[str, ...]:
+    """Canonical multi-path sorts; legacy YAML ``sort`` folds into a one-tuple."""
+    if gd.get("sorts") is not None:
+        return _str_tuple(gd.get("sorts"), default=("updated", "new", "rating"))
+    if "sort" in gd:
+        return (str(gd.get("sort") or "updated"),)
+    return ("updated", "new", "rating")
 
 
 def _build_config(data: dict[str, Any]) -> Config:
     src = data.get("sources", {})
     hn = src.get("hackernews", {})
     gd = src.get("godot", {})
+
+    hn_max_age = int(hn.get("max_age_days", 2))
+    hn_horizon = int(hn.get("freshness_horizon_days", hn_max_age if hn_max_age > 0 else 7))
+    gd_max_age = int(gd.get("max_age_days", 3))
+    gd_horizon = int(gd.get("freshness_horizon_days", gd_max_age if gd_max_age > 0 else 7))
 
     sources = SourcesConfig(
         github=_github_source(src.get("github")),
@@ -188,18 +238,28 @@ def _build_config(data: dict[str, Any]) -> Config:
             enabled=_as_bool(hn.get("enabled", False)),
             lists=tuple(hn.get("lists", []) or []),
             top_n=int(hn.get("top_n", 20)),
+            max_age_days=hn_max_age,
+            freshness_horizon_days=hn_horizon if hn_horizon > 0 else 7,
+            require_topic_match=_as_bool(hn.get("require_topic_match", True)),
+            topic_keywords=_str_tuple(hn.get("topic_keywords"), default=()),
         ),
         godot=GodotSourceConfig(
             enabled=_as_bool(gd.get("enabled", False)),
             godot_version=str(gd.get("godot_version", "")),
-            sort=str(gd.get("sort", "updated")),
             max_results=int(gd.get("max_results", 30)),
+            sorts=_godot_sorts(gd),
+            max_age_days=gd_max_age,
+            freshness_horizon_days=gd_horizon if gd_horizon > 0 else 7,
         ),
     )
 
     scoring_raw = data.get("scoring", {})
+    weights = {k: float(v) for k, v in (scoring_raw.get("weights", {}) or {}).items()}
+    # Default path_corroboration weight if omitted (keeps formula multi-path aware).
+    if "path_corroboration" not in weights:
+        weights["path_corroboration"] = 0.10
     scoring = ScoringConfig(
-        weights={k: float(v) for k, v in (scoring_raw.get("weights", {}) or {}).items()},
+        weights=weights,
         score_threshold=float(scoring_raw.get("score_threshold", 70)),
     )
 

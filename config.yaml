@@ -4,14 +4,18 @@
 sources:
   github:
     enabled: true
-    # Base keyword query; the collector appends rolling `pushed:>` and `stars:>` filters.
+    # Base keyword query; collector appends rolling pushed:> / created:> and stars:>.
     query: "godot OR gamedev OR roguelike OR indie-game OR pixel-art OR aseprite"
-    pushed_within_days: 14
-    min_stars: 30
+    pushed_within_days: 3
+    max_age_days: 3                 # hard drop older than this (0 = off)
+    freshness_horizon_days: 3       # calendar freshness unit horizon
+    min_stars: 50
     per_page: 30
+    # Multi-path: same keywords, different rankings → merge by URL.
+    # stars+updated share one corroboration family; created is orthogonal.
+    path_sorts: ["stars", "updated"]
+    created_within_days: 7
 
-  # Independent AI track (source label GitHubAI) → AI日贴 / AI周贴 only.
-  # Focus: AI tools/projects indie game developers can actually use.
   github_ai:
     enabled: true
     query: >-
@@ -19,66 +23,69 @@ sources:
       OR "text-to-image" OR "procedural generation" OR "npc dialogue"
       OR "ai agent" OR "game ai")
       (game OR gamedev OR godot OR unity OR unreal OR "indie game")
-    pushed_within_days: 14
-    min_stars: 20
+    pushed_within_days: 3
+    max_age_days: 3
+    freshness_horizon_days: 3
+    min_stars: 30
     per_page: 30
+    path_sorts: ["stars", "updated"]
+    created_within_days: 7
 
   hackernews:
     enabled: true
-    lists: ["topstories", "showstories"]   # which HN story lists to pull
-    top_n: 20                              # items per list before filtering
+    lists: ["topstories", "showstories"]
+    top_n: 30
+    max_age_days: 2
+    freshness_horizon_days: 2
+    require_topic_match: true
+    # topic_keywords: []   # optional override; empty → built-in list
 
   godot:
     enabled: true
     godot_version: "4.x"
-    sort: "updated"                        # updated | new | name | cost
+    sorts: ["updated", "new", "rating"]
     max_results: 30
+    max_age_days: 3
+    freshness_horizon_days: 3
 
 scoring:
-  # Plan.md formula. Each dimension rated 0–10 by the cheap model.
-  # `risk` is a deduction. Score is normalised by the sum of positive weights
-  # inside compute_score (no separate load-time normalisation).
+  # Positive dims + path_corroboration (from multi-path) + risk deduction.
+  # Final score always = compute_score(dimensions, weights) after anchoring
+  # freshness + path_corroboration from DiscoverySignals.
   weights:
-    relevance: 0.30
-    utility: 0.25
+    relevance: 0.28
+    utility: 0.22
     freshness: 0.15
     popularity: 0.10
-    differentiation: 0.10
-    biz_value: 0.10
+    differentiation: 0.08
+    biz_value: 0.07
+    path_corroboration: 0.10
     risk: 0.10
-  # Items with score >= threshold enter 日贴/周贴 candidate pool.
   score_threshold: 70
 
-# Cap items after dedup when CLI --limit is not set (cost control).
 max_items_per_run: 40
 
-# Daily / weekly digests: AI-written, human copy-pastes to publish (no auto-post).
-# AI日贴/AI周贴 are separate packages fed only by sources.github_ai (GitHubAI).
 digest:
   daily_enabled: true
-  weekly_enabled: false          # enable via --weekly or set true on weekly cron
+  weekly_enabled: false
   ai_daily_enabled: true
-  ai_weekly_enabled: true        # generated when --weekly (and ai_weekly_enabled)
+  ai_weekly_enabled: true
   max_items_daily: 8
   max_items_weekly: 15
   max_items_ai_daily: 6
   max_items_ai_weekly: 12
   weekly_lookback_days: 7
-  rewrite_per_item: false        # per-item long posts are expensive; digests are primary
-  output_dir: "output"           # HTML/MD with one-click copy buttons
+  rewrite_per_item: false
+  output_dir: "output"
 
 ai:
-  # Default: DeepSeek official OpenAI-compatible endpoint.
-  # Override at deploy time with AI_BASE_URL in .env / GitHub Secrets.
   base_url: "https://api.deepseek.com"
-  cheap_model: "deepseek-chat"    # triage + per-dimension scoring
-  strong_model: "deepseek-chat"   # digests + optional per-item rewrite
+  cheap_model: "deepseek-chat"
+  strong_model: "deepseek-chat"
   temperature: 0.2
   timeout_seconds: 90
 
 feishu:
   app_token: "${FEISHU_APP_TOKEN}"
   table_id: "${FEISHU_TABLE_ID}"
-  # Only treat source_urls from records with 抓取时间 within this many days
-  # as already-seen. Records with no 抓取时间 are always treated as seen.
   dedup_lookback_days: 14

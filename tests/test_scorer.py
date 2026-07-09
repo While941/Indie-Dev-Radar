@@ -77,8 +77,10 @@ def test_coerce_clamps_and_defaults() -> None:
 
 def test_coerce_complete_keys() -> None:
     out = coerce_dimensions({})
-    assert set(out) == {"relevance", "utility", "freshness", "popularity",
-                        "differentiation", "biz_value", "risk"}
+    assert set(out) == {
+        "relevance", "utility", "freshness", "popularity",
+        "differentiation", "biz_value", "path_corroboration", "risk",
+    }
 
 
 # --- parse_score_response -------------------------------------------------
@@ -169,3 +171,42 @@ def test_scorer_all_aborts_on_auth_error() -> None:
 def _ok_response() -> dict:
     return {"relevance": 8, "utility": 7, "freshness": 7, "popularity": 5,
             "differentiation": 6, "biz_value": 4, "risk": 2}
+
+
+def test_scorer_anchors_signals_then_recomputes() -> None:
+    """Final score = compute_score after freshness + path_corroboration anchors."""
+    from models.signals import DiscoverySignals
+
+    weights = {
+        **DEFAULT_WEIGHTS,
+        "path_corroboration": 0.10,
+    }
+    # AI claims freshness=10; discovery says freshness=0.2 → dim 2.0
+    raw = {d: 10 for d in ("relevance", "utility", "freshness", "popularity",
+                           "differentiation", "biz_value")}
+    raw["risk"] = 0
+    raw.update({
+        "category": "x", "tags": [], "risk_level": "低",
+        "one_line_summary": "s", "recommended_action": "发布",
+        "recommended_platforms": ["知乎"], "target_audience": "dev",
+    })
+    fake = FakeChatClient([raw])
+    scorer = Scorer("cheap", weights, fake, timeout=10)
+    item = IntelligenceItem(
+        source="GitHub", source_url="https://x/1", title="t",
+        summary_raw="s", author="a", published_at=None,
+        fetched_at=datetime(2026, 7, 7, tzinfo=timezone.utc),
+        score_raw={"stars": 10},
+        signals=DiscoverySignals(
+            paths=("godot_updated", "godot_rating"),
+            age_days=2.0,
+            freshness=0.2,
+            multi_path=0.75,
+            popularity=0.4,
+        ),
+    )
+    result = scorer.score(item)
+    assert result.dimensions["freshness"] == pytest.approx(2.0)
+    assert result.dimensions["path_corroboration"] == pytest.approx(7.5)
+    # Score must match recompute from stored dimensions
+    assert result.score == compute_score(result.dimensions, weights)

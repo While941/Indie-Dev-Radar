@@ -357,8 +357,10 @@ def build_pipeline(
     if cfg.ai_api_key:
         ai_client = AIClient(cfg.ai.base_url, cfg.ai_api_key, client=client,
                              timeout=cfg.ai.timeout_seconds)
-        scorer = Scorer(cfg.ai.cheap_model, cfg.scoring.weights, ai_client,
-                        temperature=cfg.ai.temperature, timeout=cfg.ai.timeout_seconds)
+        scorer = Scorer(
+            cfg.ai.cheap_model, cfg.scoring.weights, ai_client,
+            temperature=cfg.ai.temperature, timeout=cfg.ai.timeout_seconds,
+        )
         if cfg.digest.rewrite_per_item:
             rewriter = Rewriter(
                 cfg.ai.strong_model, cfg.scoring.score_threshold, ai_client,

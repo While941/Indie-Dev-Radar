@@ -1,15 +1,17 @@
-"""GitHub collector (Search API).
+"""GitHub collector (Search API) with multi-path discovery.
 
-    GET https://api.github.com/search/repositories?q=...&sort=stars&order=desc
-        -> {"items": [{full_name, html_url, description, owner, ...}, ...]}
+Paths (configurable via ``path_sorts`` / ``created_within_days``):
 
-Auth via ``GH_TOKEN`` lifts the search rate limit from 10/min to 30/min and the
-core limit to 5000/h. A ``User-Agent`` is required by the API.
+- ``stars`` / ``updated``: keyword + recent push + min_stars (same query family)
+- ``created``: keyword + recently created repos (orthogonal family)
+
+Results merge by URL; orthogonal multi-path hits raise path_corroboration.
 """
 from __future__ import annotations
 
-import logging
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 import httpx
 
@@ -17,10 +19,11 @@ from config import GitHubSourceConfig
 from models.item import IntelligenceItem
 
 from .base import Collector, USER_AGENT, get_json, parse_iso
-
-log = logging.getLogger(__name__)
+from .multi_path import collect_paths, dedupe_strs
 
 BASE_URL = "https://api.github.com"
+DEFAULT_PATH_SORTS = ("stars", "updated")
+QueryMode = Literal["pushed", "created"]
 
 
 class GitHubCollector(Collector):
@@ -47,19 +50,32 @@ class GitHubCollector(Collector):
             headers["Authorization"] = f"Bearer {self._token}"
         return headers
 
-    def _build_query(self) -> str:
-        cutoff = (self._now - timedelta(days=self._cfg.pushed_within_days)).date().isoformat()
+    def _path_sorts(self) -> list[str]:
+        sorts = list(self._cfg.path_sorts) if self._cfg.path_sorts else list(DEFAULT_PATH_SORTS)
+        return dedupe_strs(sorts) or list(DEFAULT_PATH_SORTS)
+
+    def _build_query(self, *, mode: QueryMode = "pushed") -> str:
+        if mode == "created":
+            days = self._cfg.created_within_days or self._cfg.pushed_within_days
+            cutoff = (self._now - timedelta(days=max(1, days))).date().isoformat()
+            return f"{self._cfg.query} created:>{cutoff} stars:>{self._cfg.min_stars}"
+        days = self._cfg.pushed_within_days
+        cutoff = (self._now - timedelta(days=max(1, days))).date().isoformat()
         return f"{self._cfg.query} pushed:>{cutoff} stars:>{self._cfg.min_stars}"
 
-    def collect(self) -> list[IntelligenceItem]:
+    def _search(self, *, sort: str, mode: QueryMode = "pushed") -> list[IntelligenceItem]:
         params = {
-            "q": self._build_query(),
-            "sort": "stars",
+            "q": self._build_query(mode=mode),
+            "sort": sort,
             "order": "desc",
             "per_page": str(self._cfg.per_page),
         }
-        data = get_json(self._client, f"{self._base_url}/search/repositories",
-                        params=params, headers=self._headers())
+        data = get_json(
+            self._client,
+            f"{self._base_url}/search/repositories",
+            params=params,
+            headers=self._headers(),
+        )
         repos = data.get("items", []) if isinstance(data, dict) else []
         if not isinstance(repos, list):
             return []
@@ -71,8 +87,23 @@ class GitHubCollector(Collector):
             item = self._to_item(repo, self._now, source=self._source_label)
             if item is not None:
                 items.append(item)
-        log.info("%s: collected %d items", self._source_label, len(items))
         return items
+
+    def collect(self) -> list[IntelligenceItem]:
+        fetchers: dict[str, Callable[[], Sequence[IntelligenceItem]]] = {
+            f"gh_{sort}": (lambda s=sort: self._search(sort=s, mode="pushed"))
+            for sort in self._path_sorts()
+        }
+        if self._cfg.created_within_days > 0:
+            fetchers["gh_created"] = lambda: self._search(sort="stars", mode="created")
+
+        return collect_paths(
+            fetchers,
+            now=self._now,
+            max_age_days=self._cfg.max_age_days,
+            freshness_horizon_days=self._cfg.freshness_horizon_days,
+            log_label=self._source_label,
+        )
 
     @staticmethod
     def _to_item(
@@ -88,6 +119,7 @@ class GitHubCollector(Collector):
         owner = repo.get("owner") if isinstance(repo.get("owner"), dict) else {}
         topics = repo.get("topics")
         topics_tuple = tuple(topics) if isinstance(topics, list) else ()
+        published = parse_iso(repo.get("pushed_at")) or parse_iso(repo.get("updated_at"))
 
         return IntelligenceItem(
             source=source,
@@ -95,7 +127,7 @@ class GitHubCollector(Collector):
             title=repo.get("full_name") or repo.get("name") or html_url,
             summary_raw=(repo.get("description") or "").strip(),
             author=owner.get("login"),
-            published_at=parse_iso(repo.get("pushed_at")),
+            published_at=published,
             fetched_at=fetched_at,
             score_raw={
                 "stars": repo.get("stargazers_count"),
@@ -103,5 +135,6 @@ class GitHubCollector(Collector):
                 "language": repo.get("language"),
                 "topics": topics_tuple,
                 "homepage": repo.get("homepage"),
+                "created_at": repo.get("created_at"),
             },
         )

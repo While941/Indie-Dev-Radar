@@ -1,8 +1,9 @@
-"""Scoring: cheap model rates 8 dimensions; code computes a deterministic score.
+"""Scoring: cheap model rates dimensions; code computes a deterministic score.
 
 The model only emits per-dimension ratings (0-10) plus qualitative fields.
-``compute_score`` applies the Plan.md weighted formula in code so the score is
-auditable and tunable via config weights (no model score drift).
+``compute_score`` applies the weighted formula in code. Collector
+``DiscoverySignals`` then anchor ``freshness`` and ``path_corroboration``;
+the final score is always recomputed from the merged dimensions (auditable).
 """
 from __future__ import annotations
 
@@ -15,11 +16,14 @@ from models.item import IntelligenceItem
 
 from .ai_client import AIAuthError, ChatClient
 from .prompts import SCORE_SYSTEM, build_score_user
+from .signals import PATH_DIM, apply_discovery_signals
 
 log = logging.getLogger(__name__)
 
-POSITIVE_DIMS = ("relevance", "utility", "freshness", "popularity",
-                 "differentiation", "biz_value")
+POSITIVE_DIMS = (
+    "relevance", "utility", "freshness", "popularity",
+    "differentiation", "biz_value", PATH_DIM,
+)
 RISK_DIM = "risk"
 ALL_DIMS = POSITIVE_DIMS + (RISK_DIM,)
 
@@ -32,11 +36,14 @@ def compute_score(dimensions: Mapping[str, float], weights: Mapping[str, float])
     """Apply the weighted formula and map to a 0-100 score.
 
     Positive dimensions add (max 100 when all = 10); ``risk`` is a deduction.
+    Only dimensions present in ``POSITIVE_DIMS`` / risk with non-zero weight count.
     """
     total = 0.0
     max_total = 0.0
     for d in POSITIVE_DIMS:
         w = float(weights.get(d, 0.0))
+        if w == 0.0:
+            continue
         total += float(dimensions.get(d, 0.0)) * w
         max_total += 10.0 * w
     risk_w = float(weights.get(RISK_DIM, 0.0))
@@ -107,8 +114,15 @@ def parse_score_response(
 
 
 class Scorer:
-    def __init__(self, model: str, weights: Mapping[str, float], client: ChatClient,
-                 *, temperature: float = 0.2, timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        model: str,
+        weights: Mapping[str, float],
+        client: ChatClient,
+        *,
+        temperature: float = 0.2,
+        timeout: float = 60.0,
+    ) -> None:
         self._model = model
         self._weights = weights
         self._client = client
@@ -122,6 +136,10 @@ class Scorer:
             temperature=self._temperature, timeout=self._timeout,
         )
         analysis = parse_score_response(raw, self._weights)
+        # Anchor calendar freshness + path corroboration, then recompute once.
+        dims = apply_discovery_signals(analysis["dimensions"], item)
+        analysis["dimensions"] = dims
+        analysis["score"] = compute_score(dims, self._weights)
         return replace(item, **analysis)
 
     def score_all(self, items: list[IntelligenceItem]) -> list[IntelligenceItem]:
